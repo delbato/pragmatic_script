@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 logos = "0.10.0-rc2"
+stack-vm = "1.0.1"

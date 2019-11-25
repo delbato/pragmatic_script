@@ -27,7 +27,7 @@ pub enum Token {
     #[token = "string"]
     String,
 
-    #[regex = "[a-zA-Z]+"]
+    #[regex = "[a-zA-Z][a-zA-Z0-9]*"]
     Text,
 
     #[regex = "[0-9]+"]
@@ -56,6 +56,27 @@ pub enum Token {
     
     #[token = ";"]
     Semicolon,
+
+    #[token = "="]
+    Assign,
+
+    #[token = "+"]
+    Plus,
+    
+    #[token = "-"]
+    Minus,
+
+    #[token = "*"]
+    Times,
+
+    #[token = "/"]
+    Divide,
+
+    #[token = "=="]
+    Equals,
+
+    #[token = "!="]
+    NotEquals,
 
     #[token = "~"]
     FnReturn,

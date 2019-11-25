@@ -1,8 +1,7 @@
 extern crate logos;
+extern crate stack_vm;
 
-
-pub mod ast;
-
-pub mod lexer;
 
 pub mod parser;
+
+pub mod vm;
