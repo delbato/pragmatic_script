@@ -5,7 +5,12 @@ use std::{
     }
 };
 
-use logos::Logos;
+use logos::{
+    Logos,
+    Lexer as LogosLexer
+};
+
+pub type Lexer<'s> = LogosLexer<Token, &'s str>;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token {
@@ -17,6 +22,9 @@ pub enum Token {
 
     #[token = "fn"]
     Fn,
+
+    #[token = "var"]
+    Var,
 
     #[token = "int"]
     Int,
@@ -56,6 +64,9 @@ pub enum Token {
     
     #[token = ";"]
     Semicolon,
+
+    #[token = ":"]
+    Colon,
 
     #[token = "="]
     Assign,

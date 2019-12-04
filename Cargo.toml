@@ -1,11 +1,8 @@
-[package]
-name = "pragmatic_script"
-version = "0.1.0"
-authors = ["Daniel Wanner <daniel.wanner@pm.me>"]
-edition = "2018"
+[workspace]
+members = [
+    "pgs",
+    "pgsh"
+]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-logos = "0.10.0-rc2"
-stack-vm = "1.0.1"
+[profile.release]
+lto = true

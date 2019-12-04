@@ -7,16 +7,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'pragmatic_script'",
+            "name": "Debug unit tests in library 'pgs'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=pragmatic_script"
+                    "--package=pgs"
                 ],
                 "filter": {
-                    "name": "pragmatic_script",
+                    "name": "pgs",
                     "kind": "lib"
                 }
             },

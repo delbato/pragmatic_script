@@ -1,6 +1,7 @@
 use std::{
     collections::{
-        HashMap
+        HashMap,
+        BTreeMap
     }
 };
 
@@ -72,7 +73,7 @@ pub enum Operator {
 #[derive(PartialEq, Debug)]
 pub struct FunctionDeclArgs {
     pub name: String,
-    pub arguments: HashMap<String, Type>,
+    pub arguments: BTreeMap<usize, (String, Type)>,
     pub returns: Type,
     pub code_block: Option<Vec<Statement>>
 }
@@ -101,5 +102,6 @@ pub enum Statement {
 pub enum Type {
     Int,
     String,
-    Float
+    Float,
+    Custom(String)
 }
