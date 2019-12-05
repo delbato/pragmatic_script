@@ -10,6 +10,7 @@ use super::{
     builder::{
         Builder
     },
+    checker::Checker,
     instruction::Instruction
 };
 
@@ -36,6 +37,7 @@ pub struct Compiler {
 
 pub struct Context {
     pub variables: HashMap<String, isize>,
+    pub variable_types: HashMap<String, Type>,
     pub functions: HashMap<String, Type>,
     pub stack_size: usize
 }
@@ -45,6 +47,7 @@ impl Context {
         Context {
             variables: HashMap::new(),
             functions: HashMap::new(),
+            variable_types: HashMap::new(),
             stack_size: 0
         }
     }
@@ -56,17 +59,34 @@ pub type CompilerResult<T> = Result<T, CompilerError>;
 pub enum CompilerError {
     Unknown,
     UnknownType,
-    NotImplemented
+    NotImplemented,
+    UnknownVariable,
+    TypeMismatch
 }
 
 impl Compiler {
     pub fn new() -> Compiler {
-        Compiler {
+        let comp = Compiler {
             context_stack: VecDeque::new(),
             builder: Builder::new(),
             function_uid_map: HashMap::new(),
             function_uid_set: HashSet::new()
-        }
+        };
+        comp
+    }
+
+    pub fn push_context(&mut self) {
+        let stack_size = {
+            let front_context_opt = self.context_stack.get(0);
+            if front_context_opt.is_some() {
+                front_context_opt.unwrap().stack_size
+            } else {
+                0
+            }
+        };
+        let mut context = Context::new();
+        context.stack_size = stack_size;
+        self.context_stack.push_front(context);
     }
 
     pub fn push_empty_context(&mut self) {
@@ -129,6 +149,7 @@ impl Compiler {
         for (_, (var_name, var_type)) in fn_decl_args.arguments.iter().rev() {
             let size = self.size_of_type(var_type)?;
             context.variables.insert(var_name.clone(), stack_index - size as isize);
+            context.variable_types.insert(var_name.clone(), var_type.clone());
             stack_index -= size as isize;
         }
 
@@ -167,12 +188,22 @@ impl Compiler {
         };
 
         let size = self.size_of_type(&var_decl_args.var_type)?;
+        let var_type = var_decl_args.var_type.clone();
         // Insert variable to context
         {
             let front_context = self.context_stack.get_mut(0)
                 .ok_or(CompilerError::Unknown)?;
             front_context.variables.insert(var_decl_args.name.clone(), front_context.stack_size as isize);
+            front_context.variable_types.insert(var_decl_args.name.clone(), var_type.clone());
             front_context.stack_size += size;
+        }
+
+        let checker = Checker::new(&self);
+        let expr_type = checker.check_expr_type(&var_decl_args.assignment)
+            .map_err(|_| CompilerError::TypeMismatch)?;
+
+        if expr_type != var_type {
+            return Err(CompilerError::TypeMismatch);
         }
 
         self.compile_expr(&var_decl_args.assignment)?;
@@ -181,6 +212,36 @@ impl Compiler {
     }
 
     pub fn compile_var_assign(&mut self, stmt: Statement) -> CompilerResult<()> {
+        let (var_name, expr) = match stmt {
+            Statement::Assignment(name, assign) => (name, assign),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let var_type = self.type_of_var(var_name.clone())?;
+        let checker = Checker::new(&self);
+        let expr_type = checker.check_expr_type(&expr)
+            .map_err(|_| CompilerError::TypeMismatch)?;
+
+        if expr_type != var_type {
+            return Err(CompilerError::TypeMismatch);
+        }
+
+        let var_offset = self.offset_of_var(var_name.clone())?;
+
+        self.compile_expr(&expr)?;
+        
+        let mov_instr = match var_type {
+            Type::Int => {
+                Instruction::new(Opcode::MOVI)
+                    .with_operand(&var_offset)
+            },
+            _ => {
+                return Err(CompilerError::NotImplemented);
+            }
+        };
+
+        self.builder.push_instr(mov_instr);
+
         Ok(())
     }
 
@@ -244,6 +305,22 @@ impl Compiler {
             }
         };
         Ok(size)
+    }
+
+    pub fn offset_of_var(&self, var_name: String) -> CompilerResult<isize> {
+        let front_context = self.context_stack.get(0)
+            .ok_or(CompilerError::UnknownVariable)?;
+        front_context.variables.get(&var_name)
+            .ok_or(CompilerError::UnknownVariable)
+            .map(|val| val.clone())
+    }
+
+    pub fn type_of_var(&self, var_name: String) -> CompilerResult<Type> {
+        let front_context = self.context_stack.get(0)
+            .ok_or(CompilerError::UnknownVariable)?;
+        let var_type = front_context.variable_types.get(&var_name)
+            .ok_or(CompilerError::UnknownVariable)?;
+        Ok(var_type.clone())
     }
 
     pub fn get_resulting_code(&mut self) -> Vec<u8> {
@@ -311,6 +388,53 @@ mod test {
         comp_builder.push_instr(dupi_instr);
         comp_builder.push_instr(pushi2_instr);
         comp_builder.push_instr(addi_instr);
+
+        let comp_code = comp_builder.build();
+        let code = compiler.get_resulting_code();
+
+        assert_eq!(comp_code, code);
+    }
+
+    #[test]
+    fn test_compile_addi_assign() {
+        let code = String::from("
+            var:int x = 4;
+            x = x + 4;
+        ");
+
+        let mut lexer = Token::lexer(code.as_str());
+        let parser = Parser::new(code.clone());
+        let stmt_list_res = parser.parse_statement_list(&mut lexer);
+
+        assert!(stmt_list_res.is_ok());
+        let stmt_list = stmt_list_res.unwrap();
+
+        let mut compiler = Compiler::new();
+        compiler.reset_builder();
+        compiler.push_empty_context();
+
+        for stmt in stmt_list {
+            let cmp_res = compiler.compile_statement(stmt);
+            assert!(cmp_res.is_ok());
+        }
+
+        let mut comp_builder = Builder::new();
+
+        let pushi_instr = Instruction::new(Opcode::PUSHI)
+            .with_operand::<i64>(&4);
+        let dupi_instr = Instruction::new(Opcode::DUPI)
+            .with_operand::<i64>(&0);
+        let pushi2_instr = Instruction::new(Opcode::PUSHI)
+            .with_operand::<i64>(&4);
+        let addi_instr = Instruction::new(Opcode::ADDI);
+        let movi_instr = Instruction::new(Opcode::MOVI)
+            .with_operand::<i64>(&0);
+
+        comp_builder.push_instr(pushi_instr);
+        comp_builder.push_instr(dupi_instr);
+        comp_builder.push_instr(pushi2_instr);
+        comp_builder.push_instr(addi_instr);
+        comp_builder.push_instr(movi_instr);
 
         let comp_code = comp_builder.build();
         let code = compiler.get_resulting_code();

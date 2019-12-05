@@ -10,3 +10,5 @@ pub mod parser;
 pub mod vm;
 
 pub mod codegen;
+
+pub mod engine;

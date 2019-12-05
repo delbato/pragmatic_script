@@ -10,6 +10,7 @@ pub enum Expression {
     IntLiteral(i64),
     FloatLiteral(f64),
     StringLiteral(String),
+    BoolLiteral(bool),
     Variable(String),
     Addition(Box<Expression>, Box<Expression>),
     Subtraction(Box<Expression>, Box<Expression>),
@@ -108,10 +109,11 @@ pub enum Statement {
     Return(Box<Expression>)
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Type {
     Int,
     String,
     Float,
+    Bool,
     Custom(String)
 }

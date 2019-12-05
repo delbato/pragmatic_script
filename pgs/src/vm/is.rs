@@ -10,6 +10,7 @@ use std::{
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Opcode {
+    /// 0x00
     NOOP, // 0x00
     PUSHI, // 0x01
     POPI, // 0x02
@@ -31,6 +32,8 @@ pub enum Opcode {
     LTEQI, // 0x12
     DUPI, // 0x13
     DUPN, // 0x14
+    MOVI, // 0x15
+    MOVF, // 0x16
 }
 
 impl From<u8> for Opcode {
@@ -98,6 +101,12 @@ impl From<u8> for Opcode {
             },
             0x14 => {
                 Opcode::DUPN
+            },
+            0x15 => {
+                Opcode::MOVI
+            },
+            0x16 => {
+                Opcode::MOVF
             },
             _ => panic!("{:X} is not a valid opcode!", val)
         }
