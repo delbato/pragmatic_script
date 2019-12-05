@@ -23,6 +23,9 @@ pub enum Token {
     #[token = "fn"]
     Fn,
 
+    #[token = "struct"]
+    Struct,
+
     #[token = "var"]
     Var,
 
@@ -34,6 +37,15 @@ pub enum Token {
 
     #[token = "string"]
     String,
+
+    #[token = "bool"]
+    Bool,
+
+    #[token = "true"]
+    True,
+
+    #[token = "false"]
+    False,
 
     #[regex = "[a-zA-Z][a-zA-Z0-9]*"]
     Text,
@@ -88,6 +100,18 @@ pub enum Token {
 
     #[token = "!="]
     NotEquals,
+
+    #[token = "<"]
+    LessThan,
+
+    #[token = ">"]
+    GreaterThan,
+
+    #[token = "<="]
+    LessThanEquals,
+    
+    #[token = ">="]
+    GreaterThanEquals,
 
     #[token = "~"]
     FnReturn,

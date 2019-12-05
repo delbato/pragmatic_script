@@ -14,7 +14,14 @@ pub enum Expression {
     Addition(Box<Expression>, Box<Expression>),
     Subtraction(Box<Expression>, Box<Expression>),
     Multiplication(Box<Expression>, Box<Expression>),
-    Division(Box<Expression>, Box<Expression>)
+    Division(Box<Expression>, Box<Expression>),
+    Not(Box<Expression>),
+    Equals(Box<Expression>, Box<Expression>),
+    NotEquals(Box<Expression>, Box<Expression>),
+    GreaterThan(Box<Expression>, Box<Expression>),
+    LessThan(Box<Expression>, Box<Expression>),
+    GreaterThanEquals(Box<Expression>, Box<Expression>),
+    LessThanEquals(Box<Expression>, Box<Expression>)
 }
 
 impl Expression {
@@ -56,6 +63,9 @@ impl Expression {
                 lhs.print(n + 1);
                 rhs.print(n + 1)
             },
+            _ => {
+                println!("{} Other:", baseline);
+            }
         }
     }
 }
