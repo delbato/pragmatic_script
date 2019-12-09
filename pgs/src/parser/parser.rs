@@ -311,9 +311,6 @@ impl Parser {
             operand_stack.push_front(expr);
         }
 
-        println!("Operands: {:?}", operand_stack);
-        println!("Operators: {:?}", operator_stack);
-
         operand_stack.pop_front()
             .ok_or(ParseError::UnsupportedExpression)
     }

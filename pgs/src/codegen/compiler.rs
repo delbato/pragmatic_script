@@ -11,7 +11,10 @@ use super::{
         Builder
     },
     checker::Checker,
-    instruction::Instruction
+    instruction::Instruction,
+    context::{
+        Context
+    }
 };
 
 use std::{
@@ -33,24 +36,6 @@ pub struct Compiler {
     builder: Builder,
     function_uid_map: HashMap<String, u64>,
     function_uid_set: HashSet<u64>
-}
-
-pub struct Context {
-    pub variables: HashMap<String, isize>,
-    pub variable_types: HashMap<String, Type>,
-    pub functions: HashMap<String, Type>,
-    pub stack_size: usize
-}
-
-impl Context {
-    pub fn new() -> Context {
-        Context {
-            variables: HashMap::new(),
-            functions: HashMap::new(),
-            variable_types: HashMap::new(),
-            stack_size: 0
-        }
-    }
 }
 
 pub type CompilerResult<T> = Result<T, CompilerError>;
@@ -148,9 +133,8 @@ impl Compiler {
         let mut stack_index = 0;
         for (_, (var_name, var_type)) in fn_decl_args.arguments.iter().rev() {
             let size = self.size_of_type(var_type)?;
-            context.variables.insert(var_name.clone(), stack_index - size as isize);
-            context.variable_types.insert(var_name.clone(), var_type.clone());
-            stack_index -= size as isize;
+            context.set_var(stack_index, (var_name.clone(), var_type.clone()));
+            stack_index -= size as i64;
         }
 
         self.context_stack.push_front(context);
@@ -193,9 +177,7 @@ impl Compiler {
         {
             let front_context = self.context_stack.get_mut(0)
                 .ok_or(CompilerError::Unknown)?;
-            front_context.variables.insert(var_decl_args.name.clone(), front_context.stack_size as isize);
-            front_context.variable_types.insert(var_decl_args.name.clone(), var_type.clone());
-            front_context.stack_size += size;
+            front_context.push_var((var_decl_args.name.clone(), var_type.clone()));
         }
 
         let checker = Checker::new(&self);
@@ -226,12 +208,22 @@ impl Compiler {
             return Err(CompilerError::TypeMismatch);
         }
 
-        let var_offset = self.offset_of_var(var_name.clone())?;
-
         self.compile_expr(&expr)?;
         
+        let var_offset = {
+            let front_context = self.context_stack.get(0)
+                .ok_or(CompilerError::Unknown)?;
+            front_context.offset_of(&var_name)
+                .ok_or(CompilerError::UnknownVariable)?
+        };
+
+        println!("Var offset for MOVI is: {}", var_offset);
+
         let mov_instr = match var_type {
             Type::Int => {
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 8;
                 Instruction::new(Opcode::MOVI)
                     .with_operand(&var_offset)
             },
@@ -251,44 +243,66 @@ impl Compiler {
                 let pushi_instr = Instruction::new(Opcode::PUSHI)
                     .with_operand(int);
                 self.builder.push_instr(pushi_instr);
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size += 8;
             },
             Expression::FloatLiteral(float) => {
                 return Err(CompilerError::NotImplemented);
             },
-            Expression::Variable(var_name) => {
+            Expression::Variable(var_name) => {      
+                let var_offset = {
+                    let front_context = self.context_stack.get(0)
+                        .ok_or(CompilerError::Unknown)?;
+                    front_context.offset_of(var_name)
+                        .ok_or(CompilerError::UnknownVariable)?
+                };
+                let dupi_instr = Instruction::new(Opcode::DUPI)
+                    .with_operand(&var_offset);
+                self.builder.push_instr(dupi_instr);
                 let front_context = self.context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
-                
-                let stack_index = front_context.variables.get(var_name)
-                    .ok_or(CompilerError::Unknown)?;
-
-                let dupi_instr = Instruction::new(Opcode::DUPI)
-                    .with_operand(&stack_index);
-                self.builder.push_instr(dupi_instr);
+                front_context.stack_size += 8;
             },
             Expression::Addition(lhs, rhs) => {
                 self.compile_expr(&lhs)?;
                 self.compile_expr(&rhs)?;
                 let addi_instr = Instruction::new(Opcode::ADDI);
                 self.builder.push_instr(addi_instr);
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 16;
+                front_context.stack_size += 8;
             },
             Expression::Subtraction(lhs, rhs) => {
                 self.compile_expr(&lhs)?;
                 self.compile_expr(&rhs)?;
                 let subi_instr = Instruction::new(Opcode::SUBI);
                 self.builder.push_instr(subi_instr);
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 16;
+                front_context.stack_size += 8;
             },
             Expression::Multiplication(lhs, rhs) => {
                 self.compile_expr(&lhs)?;
                 self.compile_expr(&rhs)?;
                 let muli_instr = Instruction::new(Opcode::MULI);
                 self.builder.push_instr(muli_instr);
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 16;
+                front_context.stack_size += 8;
             },
             Expression::Division(lhs, rhs) => {
                 self.compile_expr(&lhs)?;
                 self.compile_expr(&rhs)?;
                 let divi_instr = Instruction::new(Opcode::DIVI);
                 self.builder.push_instr(divi_instr);
+                let front_context = self.context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 16;
+                front_context.stack_size += 8;
             },
             _ => return Err(CompilerError::NotImplemented)
         };
@@ -305,14 +319,6 @@ impl Compiler {
             }
         };
         Ok(size)
-    }
-
-    pub fn offset_of_var(&self, var_name: String) -> CompilerResult<isize> {
-        let front_context = self.context_stack.get(0)
-            .ok_or(CompilerError::UnknownVariable)?;
-        front_context.variables.get(&var_name)
-            .ok_or(CompilerError::UnknownVariable)
-            .map(|val| val.clone())
     }
 
     pub fn type_of_var(&self, var_name: String) -> CompilerResult<Type> {
@@ -379,7 +385,7 @@ mod test {
         let pushi_instr = Instruction::new(Opcode::PUSHI)
             .with_operand::<i64>(&4);
         let dupi_instr = Instruction::new(Opcode::DUPI)
-            .with_operand::<i64>(&0);
+            .with_operand::<i64>(&-8);
         let pushi2_instr = Instruction::new(Opcode::PUSHI)
             .with_operand::<i64>(&4);
         let addi_instr = Instruction::new(Opcode::ADDI);
@@ -423,18 +429,92 @@ mod test {
         let pushi_instr = Instruction::new(Opcode::PUSHI)
             .with_operand::<i64>(&4);
         let dupi_instr = Instruction::new(Opcode::DUPI)
-            .with_operand::<i64>(&0);
+            .with_operand::<i64>(&-8);
         let pushi2_instr = Instruction::new(Opcode::PUSHI)
             .with_operand::<i64>(&4);
         let addi_instr = Instruction::new(Opcode::ADDI);
         let movi_instr = Instruction::new(Opcode::MOVI)
-            .with_operand::<i64>(&0);
+            .with_operand::<i64>(&-16);
 
         comp_builder.push_instr(pushi_instr);
         comp_builder.push_instr(dupi_instr);
         comp_builder.push_instr(pushi2_instr);
         comp_builder.push_instr(addi_instr);
         comp_builder.push_instr(movi_instr);
+
+        let comp_code = comp_builder.build();
+        let code = compiler.get_resulting_code();
+
+        assert_eq!(comp_code, code);
+    }
+
+    #[test]
+    fn test_compile_muli_assign() {
+        let code = String::from("
+            var:int x = 4;
+            x = x + 4;
+            var:int z = x * 2;
+            x = z;
+            var:int w = 4;
+            x = w;
+        ");
+
+        let mut lexer = Token::lexer(code.as_str());
+        let parser = Parser::new(code.clone());
+        let stmt_list_res = parser.parse_statement_list(&mut lexer);
+
+        assert!(stmt_list_res.is_ok());
+        let stmt_list = stmt_list_res.unwrap();
+
+        let mut compiler = Compiler::new();
+        compiler.reset_builder();
+        compiler.push_empty_context();
+
+        for stmt in stmt_list {
+            let cmp_res = compiler.compile_statement(stmt);
+            assert!(cmp_res.is_ok());
+        }
+
+        let mut comp_builder = Builder::new();
+
+        let pushi_instr = Instruction::new(Opcode::PUSHI) // 4
+            .with_operand::<i64>(&4);
+        let dupi_instr = Instruction::new(Opcode::DUPI) // 4,4
+            .with_operand::<i64>(&-8);
+        let pushi2_instr = Instruction::new(Opcode::PUSHI) // 4,4,4
+            .with_operand::<i64>(&4);
+        let addi_instr = Instruction::new(Opcode::ADDI); // 4,8
+        let movi_instr = Instruction::new(Opcode::MOVI) // 8
+            .with_operand::<i64>(&-16);
+        let dupi2_instr = Instruction::new(Opcode::DUPI) // 8,8
+            .with_operand::<i64>(&-8);
+        let pushi3_instr = Instruction::new(Opcode::PUSHI) // 8,8,2
+            .with_operand::<i64>(&2);
+        let muli_instr = Instruction::new(Opcode::MULI); // 8, 16
+        let dupi3_instr = Instruction::new(Opcode::DUPI) // 8, 16, 16
+            .with_operand::<i64>(&-8);
+        let movi2_instr = Instruction::new(Opcode::MOVI) // 16, 16
+            .with_operand::<i64>(&-24);
+        let pushi4_instr = Instruction::new(Opcode::PUSHI) // 16, 16, 4
+            .with_operand::<i64>(&4);
+        let dupi4_instr = Instruction::new(Opcode::DUPI) // 16, 16, 4, 4
+            .with_operand::<i64>(&-8);
+        let movi3_instr = Instruction::new(Opcode::MOVI) // 4, 16, 4
+            .with_operand::<i64>(&-32);
+
+        comp_builder.push_instr(pushi_instr);
+        comp_builder.push_instr(dupi_instr);
+        comp_builder.push_instr(pushi2_instr);
+        comp_builder.push_instr(addi_instr);
+        comp_builder.push_instr(movi_instr);
+        comp_builder.push_instr(dupi2_instr);
+        comp_builder.push_instr(pushi3_instr);
+        comp_builder.push_instr(muli_instr);
+        comp_builder.push_instr(dupi3_instr);
+        comp_builder.push_instr(movi2_instr);
+        comp_builder.push_instr(pushi4_instr);
+        comp_builder.push_instr(dupi4_instr);
+        comp_builder.push_instr(movi3_instr);
 
         let comp_code = comp_builder.build();
         let code = compiler.get_resulting_code();
