@@ -113,7 +113,8 @@ impl Parser {
     pub fn parse_statement_list(&self, lexer: &mut Lexer) -> ParseResult<Vec<Statement>> {
         let mut ret = Vec::new();
 
-        while lexer.token != Token::End &&
+        while lexer.token != Token::CloseBlock &&
+            lexer.token != Token::End &&
             lexer.token != Token::Error {
             match lexer.token {
                 Token::Var => {
@@ -121,6 +122,9 @@ impl Parser {
                 },
                 Token::Text => {
                     ret.push(self.parse_var_assign(lexer)?);
+                },
+                Token::Return => {
+                    ret.push(self.parse_return(lexer)?);
                 },
                 _ => {
                     return Err(ParseError::UnknownStatement);
@@ -130,6 +134,20 @@ impl Parser {
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_return(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        // Swallow "return"
+        lexer.advance();
+
+        let ret_expr = self.parse_expr(lexer)?;
+
+        // Swallow ";"
+        lexer.advance();
+
+        Ok(
+            Statement::Return(Box::new(ret_expr))
+        )
     }
 
     pub fn parse_var_decl(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
@@ -383,10 +401,8 @@ impl Parser {
             },
             Token::OpenBlock => {
                 lexer.advance();
-                if lexer.token != Token::CloseBlock {
-                    return Err(ParseError::ExpectedCloseBlock);
-                }
-                code_block_opt = Some(Vec::new());
+                let statements = self.parse_statement_list(lexer)?;
+                code_block_opt = Some(statements);
             },
             _ => {
                 return Err(ParseError::ExpectedBlockOrSemicolon);
@@ -601,5 +617,20 @@ mod test {
         assert!(expr_res.is_ok());
         let expr = expr_res.unwrap();
         //expr.print(0);
+    }
+
+    #[test]
+    fn test_parse_full_fn() {
+        let code = String::from("
+            fn: main(argc: int) ~ int {
+                var:int x = 4;
+                var:int y = 6;
+                return x + y;
+            }
+        ");
+
+        let parser = Parser::new(code.clone());
+        let decl_list_res = parser.parse_decl_list();
+        assert!(decl_list_res.is_ok());
     }
 }

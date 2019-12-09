@@ -9,7 +9,7 @@ use crate::{
 use serde::Serialize;
 use bincode::serialize;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Instruction {
     opcode: Opcode,
     operands: Vec<u8>,

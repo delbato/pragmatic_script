@@ -18,7 +18,7 @@ use bincode::serialize;
 #[derive(Clone)]
 pub struct Builder {
     data: Vec<u8>,
-    instructions: Vec<Instruction>,
+    pub instructions: Vec<Instruction>,
     labels: HashMap<String, usize>
 }
 

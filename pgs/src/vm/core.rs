@@ -39,9 +39,11 @@ pub type CoreResult<T> = Result<T, CoreError>;
 
 pub const STACK_GROW_INCREMENT: usize = 1024;
 pub const STACK_GROW_THRESHOLD: usize = 64;
+pub const SWAP_SPACE_SIZE: usize = 64;
 
 pub struct Core {
     stack: Vec<u8>,
+    swap: Vec<u8>,
     program: Option<Program>,
     stack_frames: VecDeque<usize>,
     call_stack: VecDeque<usize>,
@@ -65,8 +67,11 @@ impl Core {
     pub fn new(stack_size: usize) -> Core {
         let mut stack = Vec::new();
         stack.resize(stack_size, 0);
+        let mut swap = Vec::new();
+        swap.resize(SWAP_SPACE_SIZE, 0);
         Core {
             program: None,
+            swap: swap,
             stack: stack,
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
@@ -87,16 +92,30 @@ impl Core {
         )
     }
 
-    pub fn run(&mut self) -> CoreResult<()> {
-        self.run_at(0)
-    }
-    
     pub fn get_opcode(&self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
+        println!("Getting opcode {:X} ...", program.code[self.ip]);
+        println!("Opcode: {:?}", Opcode::from(program.code[self.ip]));
         Ok(
             Opcode::from(program.code[self.ip])
         )
+    }
+
+    pub fn run(&mut self) -> CoreResult<()> {
+        self.run_at(0)
+    }
+
+    pub fn run_fn(&mut self, uid: u64) -> CoreResult<()> {
+        let fn_offset = {
+            let program = self.program.as_ref()
+                .ok_or(CoreError::NoProgram)?;
+            program.functions.get(&uid)
+                .ok_or(CoreError::NoProgram)?
+                .clone()
+        };
+
+        self.run_at(fn_offset)
     }
 
     pub fn run_at(&mut self, offset: usize) -> CoreResult<()> {
@@ -109,6 +128,7 @@ impl Core {
         };
 
         while self.ip < program_len {
+            println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
             self.ip += 1;
 
@@ -118,7 +138,6 @@ impl Core {
                 },
                 Opcode::PUSHI => {
                     let op: i64 = self.get_op()?;
-                    self.ip += size_of::<i64>();
                     self.push_stack(op)?;
                 },
                 Opcode::POPI => {
@@ -127,6 +146,10 @@ impl Core {
                 Opcode::POPN => {
                     let op: u64 = self.get_op()?;
                     self.pop_n(op)?;
+                },
+                Opcode::DUPI => {
+                    let op: i64 = self.get_op()?;
+                    self.dupn_stack(op, 8)?;
                 },
                 Opcode::ADDI => {
                     let rhs: i64 = self.pop_stack()?;
@@ -152,7 +175,25 @@ impl Core {
                     self.call()?;
                 },
                 Opcode::RET => {
+                    if self.call_stack.len() == 0 {
+                        break;
+                    }
                     self.ret()?;
+                },
+                Opcode::MOVI => {
+                    let op: i64 = self.get_op()?;
+                    let target_index = (self.sp as i64 + op) as usize;
+                    self.movn(target_index, 8)?;
+                },
+                Opcode::SVSWPI => {
+                    let op: i64 = self.pop_stack()?;
+                    println!("Swapping out int {}", op);
+                    self.save_swap(op)?;
+                },
+                Opcode::LDSWPI => {
+                    let op: i64 = self.load_swap()?;
+                    println!("Swapping in int {}", op);
+                    self.push_stack(op)?;
                 },
                 _ => {
                     return Err(CoreError::UnimplementedOpcode(opcode));
@@ -184,6 +225,16 @@ impl Core {
         Ok(())
     }
 
+    fn movn(&mut self, target_index: usize, size: usize) -> CoreResult<()> {
+        self.sp -= size;
+
+        for i in 0..size {
+            self.stack[target_index + i] = self.stack[self.sp + i];
+        }
+
+        Ok(())
+    }
+
     fn get_op<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
@@ -193,6 +244,8 @@ impl Core {
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
+
+        self.ip += op_size;
 
         Ok(ret)
     }
@@ -235,6 +288,22 @@ impl Core {
             .map_err(|_| CoreError::Unknown)
     }
 
+    pub fn dupn_stack(&mut self, offset: i64, size: usize) -> CoreResult<()> {
+        if self.stack.len() - (self.sp + size) <= STACK_GROW_THRESHOLD {
+            self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
+        }
+        
+        let tmp_sp = (self.sp as i64 + offset) as usize;
+
+        for i in 0..size {
+            self.stack[self.sp + i] = self.stack[tmp_sp + i];
+        }
+
+        self.sp += size;
+
+        Ok(())
+    }
+
     pub fn pop_n(&mut self, n: u64) -> CoreResult<Vec<u8>> {
         let mut ret = Vec::new();
 
@@ -248,6 +317,38 @@ impl Core {
         }
         
         Ok(ret)
+    }
+
+    fn load_swap<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
+        let op_size = size_of::<T>();
+
+        let mut raw_bytes = Vec::new();
+        raw_bytes.resize(op_size, 0);
+
+        for i in 0..op_size {
+            raw_bytes[i] = self.swap[i];
+        }
+
+        let ret = deserialize(&raw_bytes)
+            .map_err(|_| CoreError::OperatorDeserialize)?;
+        Ok(ret)
+    }
+
+    fn save_swap<T: Serialize>(&mut self, item: T) -> CoreResult<()> {
+        let op_size = size_of::<T>();
+
+        if self.swap.len() < op_size {
+            self.swap.resize(self.swap.len() + op_size, 0);
+        }
+
+        let raw_bytes = serialize(&item)
+            .map_err(|_| CoreError::OperatorSerialize)?;
+
+        for i in 0..op_size {
+            self.swap[i] = raw_bytes[i];
+        }
+
+        Ok(())
     }
 }
 

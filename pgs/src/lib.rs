@@ -4,6 +4,8 @@ extern crate byteorder;
 extern crate bincode;
 extern crate rand;
 #[macro_use] extern crate memoffset;
+extern crate enum_primitive_derive as epd;
+extern crate num_traits;
 
 pub mod parser;
 

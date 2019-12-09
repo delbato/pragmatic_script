@@ -8,10 +8,12 @@ use crate::{
     }
 };
 
+#[derive(Clone)]
 pub struct Context {
     pub variable_indices: HashMap<String, i64>,
     pub variable_types: HashMap<String, Type>,
     pub functions: HashMap<String, Type>,
+    pub return_type: Option<Type>,
     pub stack_size: usize,
     pub weak: bool
 }
@@ -22,6 +24,7 @@ impl Context {
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),
+            return_type: None,
             stack_size: 0,
             weak: false
         }
@@ -34,6 +37,7 @@ impl Context {
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),
+            return_type: None,
             stack_size: 0,
             weak: true
         };

@@ -2,6 +2,7 @@ use std::{
     collections::HashMap
 };
 
+#[derive(PartialEq, Debug)]
 pub struct Program {
     pub code: Vec<u8>,
     pub functions: HashMap<u64, usize>
