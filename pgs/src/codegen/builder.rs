@@ -56,4 +56,16 @@ impl Builder {
 
         code
     }
+
+    pub fn get_label_offset(&mut self, label: &String) -> Option<usize> {
+        let mut code_before_size = 0;
+        let label_instr_offset = self.labels.get(label)
+            .or(None)?;
+        
+        for i in 0..*label_instr_offset {
+            code_before_size += self.instructions[i].get_size();
+        }
+
+        Some(code_before_size)
+    }
 }

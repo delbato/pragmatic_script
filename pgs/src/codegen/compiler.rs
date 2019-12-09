@@ -14,7 +14,8 @@ use super::{
     instruction::Instruction,
     context::{
         Context
-    }
+    },
+    program::Program
 };
 
 use std::{
@@ -32,6 +33,7 @@ use rand::{
 };
 
 pub struct Compiler {
+    global_context: Context,
     context_stack: VecDeque<Context>,
     builder: Builder,
     function_uid_map: HashMap<String, u64>,
@@ -44,6 +46,7 @@ pub type CompilerResult<T> = Result<T, CompilerError>;
 pub enum CompilerError {
     Unknown,
     UnknownType,
+    UnknownFunction,
     NotImplemented,
     UnknownVariable,
     TypeMismatch
@@ -52,6 +55,7 @@ pub enum CompilerError {
 impl Compiler {
     pub fn new() -> Compiler {
         let comp = Compiler {
+            global_context: Context::new(),
             context_stack: VecDeque::new(),
             builder: Builder::new(),
             function_uid_map: HashMap::new(),
@@ -76,6 +80,10 @@ impl Compiler {
 
     pub fn push_empty_context(&mut self) {
         self.context_stack.push_front(Context::new());
+    }
+
+    pub fn reset_global(&mut self) {
+        self.global_context = Context::new();
     }
 
     pub fn get_function_uid(&mut self, function_name: String) -> u64 {
@@ -332,6 +340,25 @@ impl Compiler {
     pub fn get_resulting_code(&mut self) -> Vec<u8> {
         let builder = self.builder.clone();
         builder.build()
+    }
+
+    pub fn get_program(&mut self) -> CompilerResult<Program> {
+        let mut builder = self.builder.clone();
+        let mut functions = HashMap::new();
+
+        for (fn_name, fn_uid) in self.function_uid_map.iter() {
+            let fn_offset = builder.get_label_offset(fn_name)
+                .ok_or(CompilerError::UnknownFunction)?;
+            functions.insert(*fn_uid, fn_offset);
+        }
+
+        let code = builder.build();
+
+        let program = Program::new()
+            .with_code(code)
+            .with_functions(functions);
+
+        Ok(program)
     }
 }
 

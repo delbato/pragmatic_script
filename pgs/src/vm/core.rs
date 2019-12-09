@@ -3,6 +3,11 @@ use super::{
         Opcode
     }
 };
+use crate::{
+    codegen::{
+        program::Program
+    }
+};
 
 use std::{
     collections::{
@@ -12,6 +17,9 @@ use std::{
     mem::{
         size_of,
         size_of_val
+    },
+    cell::{
+        RefCell
     }
 };
 
@@ -34,17 +42,17 @@ pub const STACK_GROW_THRESHOLD: usize = 64;
 
 pub struct Core {
     stack: Vec<u8>,
-    program: Vec<u8>,
+    program: Option<Program>,
     stack_frames: VecDeque<usize>,
     call_stack: VecDeque<usize>,
     ip: usize,
-    sp: usize,
-    function_uid_map: HashMap<u64, usize>
+    sp: usize
 }
 
 #[derive(Debug)]
 pub enum CoreError {
     Unknown,
+    NoProgram,
     UnimplementedOpcode(Opcode),
     OperatorDeserialize,
     OperatorSerialize,
@@ -54,25 +62,54 @@ pub enum CoreError {
 }
 
 impl Core {
-    pub fn new(program: Vec<u8>, stack_size: usize) -> Core {
+    pub fn new(stack_size: usize) -> Core {
         let mut stack = Vec::new();
         stack.resize(stack_size, 0);
         Core {
-            program: program,
+            program: None,
             stack: stack,
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
-            function_uid_map: HashMap::new(),
             ip: 0,
             sp: 0
         }
     }
 
-    pub fn run(&mut self) -> CoreResult<()> {
-        self.ip = 0;
+    pub fn load_program(&mut self, program: Program) {
+        self.program = Some(program);
+    }
 
-        while self.ip < self.program.len() {
-            let opcode = Opcode::from(self.program[self.ip]);
+    pub fn program_len(&self) -> CoreResult<usize> {
+        let program = self.program.as_ref()
+            .ok_or(CoreError::Unknown)?;
+        Ok(
+            program.code.len()
+        )
+    }
+
+    pub fn run(&mut self) -> CoreResult<()> {
+        self.run_at(0)
+    }
+    
+    pub fn get_opcode(&self) -> CoreResult<Opcode> {
+        let program = self.program.as_ref()
+            .ok_or(CoreError::NoProgram)?;
+        Ok(
+            Opcode::from(program.code[self.ip])
+        )
+    }
+
+    pub fn run_at(&mut self, offset: usize) -> CoreResult<()> {
+        self.ip = offset;
+
+        let program_len = {
+            let program = self.program.as_ref()
+                .ok_or(CoreError::NoProgram)?;
+            program.get_size()
+        };
+
+        while self.ip < program_len {
+            let opcode = self.get_opcode()?;
             self.ip += 1;
 
             match opcode {
@@ -125,15 +162,14 @@ impl Core {
         Ok(())
     }
 
-    pub fn run_at(&mut self, offset: usize) -> CoreResult<()> {
-        Err(CoreError::Unknown)
-    }
-
     fn call(&mut self) -> CoreResult<()> {
         let fn_uid: u64 = self.get_op()?;
         self.call_stack.push_front(self.ip);
 
-        let new_ip = self.function_uid_map.get(&fn_uid)
+        let program = self.program.as_ref()
+            .ok_or(CoreError::NoProgram)?;
+
+        let new_ip = program.functions.get(&fn_uid)
             .ok_or(CoreError::UnknownFunctionUid)?;
 
         self.ip = *new_ip;
@@ -151,7 +187,9 @@ impl Core {
     fn get_op<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
-        let raw_bytes: &[u8] = &self.program[self.ip..self.ip + op_size];
+        let program = &self.program.as_ref().unwrap().code;
+
+        let raw_bytes: &[u8] = &program[self.ip..self.ip + op_size];
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
@@ -219,6 +257,9 @@ mod test {
         vm::{
             core::*,
             is::Opcode
+        },
+        codegen::{
+            program::Program
         }
     };
 
@@ -236,7 +277,10 @@ mod test {
         code.append(&mut y_bytes);
         code.push(Opcode::ADDI.into());
 
-        let mut core = Core::new(code, 1024);
+        let program = Program::new().with_code(code);
+
+        let mut core = Core::new(1024);
+        core.load_program(program);
         let run_res = core.run();
         assert!(run_res.is_ok());
         let stack_res = core.pop_stack::<i64>();
@@ -254,7 +298,10 @@ mod test {
         let mut y_bytes = serialize(&y).unwrap();
         code.append(&mut x_bytes);
 
-        let mut core = Core::new(code, 1024);
+        let program = Program::new().with_code(code);
+
+        let mut core = Core::new(1024);
+        core.load_program(program);
         let run_res = core.run();
         assert!(run_res.is_ok());
         let stack_res = core.pop_stack::<i64>();
