@@ -176,6 +176,7 @@ impl Core {
                 },
                 Opcode::RET => {
                     if self.call_stack.len() == 0 {
+                        println!("Call stack is empty. Halting the core...");
                         break;
                     }
                     self.ret()?;

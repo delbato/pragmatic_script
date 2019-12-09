@@ -262,6 +262,7 @@ impl Compiler {
         self.builder.push_instr(sv_swap_instr);
         self.builder.push_instr(popn_instr);
         self.builder.push_instr(ld_swap_instr);
+        self.builder.push_instr(Instruction::new(Opcode::RET));
 
         Ok(())
     }
