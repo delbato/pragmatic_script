@@ -49,9 +49,11 @@ pub enum EngineError {
 
 impl Engine {
     pub fn new(stack_size: usize) -> Engine {
+        let mut compiler = Compiler::new();
+        compiler.push_default_module_context();
         Engine {
             core: Core::new(stack_size),
-            compiler: Compiler::new()
+            compiler: compiler
         }
     }
 
@@ -105,48 +107,9 @@ impl Engine {
             .map_err(|_| EngineError::CoreError)
     }
 
-    pub fn call_fn(&mut self, name: String) -> EngineResult<()> {
+    pub fn run_fn(&mut self, name: &String) -> EngineResult<()> {
         let fn_uid = self.compiler.get_function_uid(name);
         self.core.run_fn(fn_uid)
             .map_err(|_| EngineError::CoreError)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::Engine;
-    #[test]
-    fn test_engine_run() {
-        let mut engine = Engine::new(1024);
-        // PUSHI 0
-        // DUPI -16
-        // PUSHI 10
-        // MULI
-        // MOVI -16
-        // DUPI -8
-        // SVSWPI
-        // POPN 8
-        // LDSWPI
-        let code = "
-            fn: main(argc: int) ~ int {
-                var:int y = 0;
-                y = argc * 10;
-                return y;
-            }
-        ";
-
-        let load_res = engine.load_code(code);
-        assert!(load_res.is_ok());
-
-        let push_res = engine.push_stack::<i64>(5);
-        assert!(push_res.is_ok());
-        
-        let run_res = engine.call_fn(String::from("main"));
-        assert!(run_res.is_ok());
-
-        let pop_res = engine.pop_stack::<i64>();
-        assert!(pop_res.is_ok());
-
-        assert_eq!(pop_res.unwrap(), 50);
     }
 }

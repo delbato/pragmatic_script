@@ -1,26 +1,32 @@
 use std::{
-    collections::HashMap
+    collections::{
+        BTreeMap,
+        HashMap
+    }
 };
 
 use crate::{
     parser::{
-        ast::Type
+        ast::{
+            Type,
+            FunctionDeclArgs
+        }
     }
 };
 
 #[derive(Clone)]
-pub struct Context {
+pub struct FunctionContext {
     pub variable_indices: HashMap<String, i64>,
     pub variable_types: HashMap<String, Type>,
-    pub functions: HashMap<String, Type>,
+    pub functions: HashMap<String, FunctionDeclArgs>,
     pub return_type: Option<Type>,
     pub stack_size: usize,
     pub weak: bool
 }
 
-impl Context {
-    pub fn new() -> Context {
-        Context {
+impl FunctionContext {
+    pub fn new() -> FunctionContext {
+        FunctionContext {
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),
@@ -30,10 +36,10 @@ impl Context {
         }
     }
 
-    pub fn new_weak(other: &Context) -> Context {
+    pub fn new_weak(other: &FunctionContext) -> FunctionContext {
         let other_size = other.stack_size as i64;
         
-        let mut context = Context {
+        let mut context = FunctionContext {
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),
@@ -78,5 +84,26 @@ impl Context {
     pub fn set_var(&mut self, index: i64, (var_name, var_type): (String, Type)) {
         self.variable_indices.insert(var_name.clone(), index);
         self.variable_types.insert(var_name, var_type);
+    }
+}
+
+#[derive(Clone)]
+pub struct ModuleContext {
+    pub name: String,
+    pub modules: HashMap<String, ModuleContext>,
+    pub functions: HashMap<String, (u64, Type, BTreeMap<usize, (String, Type)>)>,
+    pub structs: HashMap<String, BTreeMap<usize, (String, Type)>>,
+    pub imports: HashMap<String, String>
+}
+
+impl ModuleContext {
+    pub fn new(name: String) -> ModuleContext {
+        ModuleContext {
+            name: name,
+            modules: HashMap::new(),
+            structs: HashMap::new(),
+            functions: HashMap::new(),
+            imports: HashMap::new()
+        }
     }
 }

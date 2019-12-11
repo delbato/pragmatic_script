@@ -20,7 +20,8 @@ use std::{
     },
     cell::{
         RefCell
-    }
+    },
+    ops::Range
 };
 
 use serde::{
@@ -35,6 +36,12 @@ use bincode::{
     deserialize
 };
 
+use rand::{
+    Rng,
+    RngCore,
+    thread_rng
+};
+
 pub type CoreResult<T> = Result<T, CoreError>;
 
 pub const STACK_GROW_INCREMENT: usize = 1024;
@@ -43,6 +50,8 @@ pub const SWAP_SPACE_SIZE: usize = 64;
 
 pub struct Core {
     stack: Vec<u8>,
+    heap: Vec<u8>,
+    heap_pointers: Vec<Range<usize>>,
     swap: Vec<u8>,
     program: Option<Program>,
     stack_frames: VecDeque<usize>,
@@ -73,6 +82,8 @@ impl Core {
             program: None,
             swap: swap,
             stack: stack,
+            heap: Vec::new(),
+            heap_pointers: Vec::new(),
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
             ip: 0,
@@ -80,6 +91,7 @@ impl Core {
         }
     }
 
+    #[inline]
     pub fn load_program(&mut self, program: Program) {
         self.program = Some(program);
     }
@@ -92,6 +104,7 @@ impl Core {
         )
     }
 
+    #[inline]
     pub fn get_opcode(&self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
@@ -102,6 +115,7 @@ impl Core {
         )
     }
 
+    #[inline]
     pub fn run(&mut self) -> CoreResult<()> {
         self.run_at(0)
     }
@@ -147,7 +161,7 @@ impl Core {
                     let op: u64 = self.get_op()?;
                     self.pop_n(op)?;
                 },
-                Opcode::DUPI => {
+                Opcode::SDUPI => {
                     let op: i64 = self.get_op()?;
                     self.dupn_stack(op, 8)?;
                 },
@@ -181,7 +195,7 @@ impl Core {
                     }
                     self.ret()?;
                 },
-                Opcode::MOVI => {
+                Opcode::SMOVI => {
                     let op: i64 = self.get_op()?;
                     let target_index = (self.sp as i64 + op) as usize;
                     self.movn(target_index, 8)?;
@@ -204,6 +218,7 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
     fn call(&mut self) -> CoreResult<()> {
         let fn_uid: u64 = self.get_op()?;
         self.call_stack.push_front(self.ip);
@@ -219,6 +234,7 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
     fn ret(&mut self) -> CoreResult<()> {
         let old_ip = self.call_stack.pop_front()
             .ok_or(CoreError::EmptyCallStack)?;
@@ -226,6 +242,7 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
     fn movn(&mut self, target_index: usize, size: usize) -> CoreResult<()> {
         self.sp -= size;
 
@@ -236,6 +253,66 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
+    fn sp_offset_to_address(&self, offset: i64) -> CoreResult<i64> {
+        let sp = self.sp as i64;
+
+        let addr = ((sp - offset) + 1) * -1;
+
+        Ok(addr)
+    }
+
+    #[inline]
+    fn get_mem<T: DeserializeOwned>(&mut self, address: i64) -> CoreResult<T> {
+        let op_size = size_of::<T>();
+
+        let mut raw_bytes = Vec::with_capacity(op_size);
+        raw_bytes.resize(op_size, 0);
+
+        // If accessing the stack
+        if address < 0 {
+            let addr_usize = (i64::abs(address) as usize) - 1;
+
+            for i in 0..op_size {
+                raw_bytes[i] = self.stack[addr_usize + i];
+            }
+        } else { // If accessing the heap
+            let addr_usize = address as usize;
+
+            for i in 0..op_size {
+                raw_bytes[i] = self.heap[addr_usize + i];
+            }
+        }
+
+        deserialize(&raw_bytes)
+            .map_err(|_| CoreError::OperatorDeserialize)
+    }
+
+    #[inline]
+    fn set_mem<T: Serialize>(&mut self, address: i64, item: T) -> CoreResult<()> {
+        let op_size = size_of::<T>();
+
+        let raw_bytes = serialize(&item)
+            .map_err(|_| CoreError::OperatorSerialize)?;
+
+        if address < 0 {
+            let addr_usize = (i64::abs(address) as usize) - 1;
+
+            for i in 0..op_size {
+                self.stack[addr_usize + i] = raw_bytes[i];
+            }
+        } else {
+            let addr_usize = address as usize;
+            
+            for i in 0..op_size {
+                self.heap[addr_usize + i] = raw_bytes[i];
+            }
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     fn get_op<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
@@ -251,6 +328,7 @@ impl Core {
         Ok(ret)
     }
 
+    #[inline]
     pub fn push_stack<T: Serialize>(&mut self, item: T) -> CoreResult<()> {
         let op_size = size_of::<T>();
 
@@ -270,6 +348,7 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
     pub fn pop_stack<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
@@ -289,6 +368,7 @@ impl Core {
             .map_err(|_| CoreError::Unknown)
     }
 
+    #[inline]
     pub fn dupn_stack(&mut self, offset: i64, size: usize) -> CoreResult<()> {
         if self.stack.len() - (self.sp + size) <= STACK_GROW_THRESHOLD {
             self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
@@ -305,6 +385,7 @@ impl Core {
         Ok(())
     }
 
+    #[inline]
     pub fn pop_n(&mut self, n: u64) -> CoreResult<Vec<u8>> {
         let mut ret = Vec::new();
 
@@ -320,6 +401,7 @@ impl Core {
         Ok(ret)
     }
 
+    #[inline]
     fn load_swap<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
@@ -335,6 +417,7 @@ impl Core {
         Ok(ret)
     }
 
+    #[inline]
     fn save_swap<T: Serialize>(&mut self, item: T) -> CoreResult<()> {
         let op_size = size_of::<T>();
 
@@ -350,64 +433,5 @@ impl Core {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::{
-        vm::{
-            core::*,
-            is::Opcode
-        },
-        codegen::{
-            program::Program
-        }
-    };
-
-    use bincode::serialize;
-    #[test]
-    fn test_addi() {
-        let mut code: Vec<u8> = Vec::new();
-        code.push(Opcode::PUSHI.into());
-        let x: i64 = 4;
-        let y: i64 = 6;
-        let mut x_bytes = serialize(&x).unwrap();
-        let mut y_bytes = serialize(&y).unwrap();
-        code.append(&mut x_bytes);
-        code.push(Opcode::PUSHI.into());
-        code.append(&mut y_bytes);
-        code.push(Opcode::ADDI.into());
-
-        let program = Program::new().with_code(code);
-
-        let mut core = Core::new(1024);
-        core.load_program(program);
-        let run_res = core.run();
-        assert!(run_res.is_ok());
-        let stack_res = core.pop_stack::<i64>();
-        assert!(stack_res.is_ok());
-        assert_eq!(stack_res.unwrap(), 10);
-    }
-
-    #[test]
-    fn test_push_pop_stack() {
-        let mut code: Vec<u8> = Vec::new();
-        code.push(Opcode::PUSHI.into());
-        let x: i64 = 4;
-        let y: i64 = 6;
-        let mut x_bytes = serialize(&x).unwrap();
-        let mut y_bytes = serialize(&y).unwrap();
-        code.append(&mut x_bytes);
-
-        let program = Program::new().with_code(code);
-
-        let mut core = Core::new(1024);
-        core.load_program(program);
-        let run_res = core.run();
-        assert!(run_res.is_ok());
-        let stack_res = core.pop_stack::<i64>();
-        assert!(stack_res.is_ok());
-        assert_eq!(stack_res.unwrap(), 4);
     }
 }

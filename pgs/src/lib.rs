@@ -14,3 +14,6 @@ pub mod vm;
 pub mod codegen;
 
 pub mod engine;
+
+#[cfg(test)]
+mod test;

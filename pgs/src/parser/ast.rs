@@ -5,13 +5,14 @@ use std::{
     }
 };
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Expression {
     IntLiteral(i64),
     FloatLiteral(f64),
     StringLiteral(String),
     BoolLiteral(bool),
     Variable(String),
+    Call(String, Vec<Expression>),
     Addition(Box<Expression>, Box<Expression>),
     Subtraction(Box<Expression>, Box<Expression>),
     Multiplication(Box<Expression>, Box<Expression>),
@@ -81,7 +82,7 @@ pub enum Operator {
     Divide
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct FunctionDeclArgs {
     pub name: String,
     pub arguments: BTreeMap<usize, (String, Type)>,
@@ -89,19 +90,27 @@ pub struct FunctionDeclArgs {
     pub code_block: Option<Vec<Statement>>
 }
 
-#[derive(PartialEq, Debug)]
-pub enum Declaration {
-    Function(FunctionDeclArgs)
+#[derive(PartialEq, Debug, Clone)]
+pub struct StructDeclArgs {
+    pub name: String,
+    pub members: BTreeMap<usize, (String, Type)>
 }
 
 #[derive(PartialEq, Debug)]
+pub enum Declaration {
+    Function(FunctionDeclArgs),
+    Module(String, Vec<Declaration>),
+    Struct(StructDeclArgs)
+}
+
+#[derive(PartialEq, Debug, Clone)]
 pub struct VariableDeclArgs {
     pub var_type: Type,
     pub name: String,
     pub assignment: Box<Expression>
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
     VariableDecl(VariableDeclArgs),
     Assignment(String, Box<Expression>),
@@ -115,5 +124,7 @@ pub enum Type {
     String,
     Float,
     Bool,
-    Custom(String)
+    Other(String),
+    Tuple(Vec<Type>),
+    Reference(Box<Type>)
 }

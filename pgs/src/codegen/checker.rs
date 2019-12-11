@@ -35,8 +35,12 @@ impl<'c> Checker<'c> {
             Expression::FloatLiteral(_) => Type::Float,
             Expression::StringLiteral(_) => Type::String,
             Expression::BoolLiteral(_) => Type::Bool,
+            Expression::Call(fn_name, _) => {
+                self.compiler.type_of_fn(fn_name)
+                    .map_err(|_| CheckerError::TypeMismatch)?
+            },
             Expression::Variable(name) => {
-                self.compiler.type_of_var(name.clone())
+                self.compiler.type_of_var(name)
                     .map_err(|_| CheckerError::TypeMismatch)?
             }
             Expression::Addition(lhs, rhs) => {
