@@ -53,7 +53,9 @@ pub enum ParseError {
     ExpectedOpenBlock,
     ExpectedMemberType,
     ExpectedMemberName,
-    DuplicateMember
+    DuplicateMember,
+    ExpectedImport,
+    ExpectedImportString
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -112,10 +114,66 @@ impl Parser {
             if lexer.token == Token::Fn {
                 ret.push(self.parse_fn_decl(&mut lexer)?);
             }
+            if lexer.token == Token::Struct {
+                ret.push(self.parse_struct_decl(&mut lexer)?);
+            }
+            if lexer.token == Token::Import {
+                ret.push(self.parse_import_decl(&mut lexer)?);
+            }
             lexer.advance();
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_import_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
+        if lexer.token != Token::Import {
+            return Err(ParseError::ExpectedImport);
+        }
+
+        // Swallow "import"
+        lexer.advance();
+
+        if lexer.token != Token::Colon {
+            return Err(ParseError::ExpectedColon);
+        }
+
+        // Swallow ":"
+        lexer.advance();
+        Err(ParseError::Unknown)
+    }
+
+    pub fn parse_import_string(&self, lexer: &mut Lexer) -> ParseResult<String> {
+        let delims = &[
+            Token::Semicolon,
+            Token::Assign,
+            Token::End,
+            Token::Error
+        ];
+
+        let mut import_string = String::new();
+
+        while !delims.contains(&lexer.token) {
+            if lexer.token != Token::Text {
+                return Err(ParseError::ExpectedImportString);
+            }
+
+            import_string += lexer.slice();
+            // Swallow the name
+            lexer.advance();
+
+            if lexer.token != Token::DoubleColon {
+                break;
+            }
+        }
+        
+        if lexer.token == Token::Assign {
+
+        } else if lexer.token == Token::Semicolon {
+
+        }
+
+        Err(ParseError::Unknown)
     }
 
     pub fn parse_fn_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {

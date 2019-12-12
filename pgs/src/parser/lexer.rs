@@ -32,6 +32,9 @@ pub enum Token {
     #[token = "mod"]
     Mod,
 
+    #[token = "import"]
+    Import,
+
     #[token = "int"]
     Int,
 
@@ -82,6 +85,9 @@ pub enum Token {
 
     #[token = ":"]
     Colon,
+
+    #[token = "::"]
+    DoubleColon,
 
     #[token = "="]
     Assign,
