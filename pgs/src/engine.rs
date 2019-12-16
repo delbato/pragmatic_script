@@ -58,29 +58,14 @@ impl Engine {
     }
 
     pub fn run_code(&mut self, code: &str) -> EngineResult<()> {
-        let mut parser = Parser::new(String::from(code));
-        let decl_list = parser.parse_decl_list()
-            .map_err(|_| EngineError::ParseError)?;
-        self.compiler.compile_decl_list(decl_list)
-            .map_err(|_| EngineError::CompileError)?;
-        let program = self.compiler.get_program()
-            .map_err(|_| EngineError::CompileError)?;
-        self.core.load_program(program);
-        self.core.run()
-            .map_err(|_| EngineError::CoreError)
+        self.load_code(code)?;
+        self.run_fn(&String::from("root::main"))
     }
 
     pub fn load_code(&mut self, code: &str) -> EngineResult<()> {
         let mut parser = Parser::new(String::from(code));
         let decl_list = parser.parse_decl_list()
             .map_err(|_| EngineError::ParseError)?;
-
-        println!("Decl list length: {}", decl_list.len());
-
-        if let Declaration::Function(fn_decl_args) = &decl_list[0] {
-            println!("Fn decl name: {}", fn_decl_args.name);
-            println!("Fn decl statement length: {}", fn_decl_args.code_block.as_ref().unwrap().len());
-        }
         self.compiler.compile_decl_list(decl_list)
             .map_err(|_| EngineError::CompileError)?;
         let program = self.compiler.get_program()
@@ -90,7 +75,14 @@ impl Engine {
     }
 
     pub fn run_file(&mut self, path: &Path) -> EngineResult<()> {
-        Err(EngineError::Unknown)
+        let mut file = File::open(path)
+            .map_err(|_| EngineError::Unknown)?;
+
+        let mut file_content = String::new();
+        file.read_to_string(&mut file_content)
+            .map_err(|_| EngineError::Unknown)?;
+
+       self.run_code(&file_content)
     }
 
     pub fn run_stream(&mut self, readable: Box<dyn Read>) -> EngineResult<()> {
