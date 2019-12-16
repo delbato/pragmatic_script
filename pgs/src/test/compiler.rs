@@ -317,7 +317,7 @@ pub fn test_compile_fn_decl() {
 
     println!("{:?}", compiler.builder.instructions);
 
-    let main_uid = compiler.get_function_uid(&String::from("global::main"));
+    let main_uid = compiler.get_function_uid(&String::from("root::main"));
 
     let comp_code = comp_builder.build();
     let mut fn_map = HashMap::new();
@@ -372,7 +372,7 @@ fn test_compile_stmt_call() {
 
     println!("{:?}", compiler.builder.instructions);
 
-    let five_uid = compiler.get_function_uid(&String::from("global::five"));
+    let five_uid = compiler.get_function_uid(&String::from("root::five"));
 
     let comp_code = comp_builder.build();
     let mut fn_map = HashMap::new();

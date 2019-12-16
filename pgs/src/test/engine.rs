@@ -31,7 +31,7 @@ fn test_engine_run() {
     let push_res = engine.push_stack::<i64>(5);
     assert!(push_res.is_ok());
     
-    let run_res = engine.run_fn(&String::from("global::main"));
+    let run_res = engine.run_fn(&String::from("root::main"));
     assert!(run_res.is_ok());
 
     let pop_res = engine.pop_stack::<i64>();

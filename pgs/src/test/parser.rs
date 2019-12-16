@@ -9,6 +9,24 @@ use crate::{
 use logos::Logos;
 
 #[test]
+fn test_parse_import_decl() {
+    let code = String::from("
+        import root::lol::get_fucked = GetFucked;
+    ");
+
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+
+    let decl_res = parser.parse_import_decl(&mut lexer);
+    assert!(decl_res.is_ok());
+
+    if let Declaration::Import(import_string, import_name) = decl_res.unwrap() {
+        assert_eq!(import_string, String::from("root::lol::get_fucked"));
+        assert_eq!(import_name, String::from("GetFucked"));
+    }
+}
+
+#[test]
 fn test_neg_parse_struct_decl() {
     let code = String::from("
         struct: Integer {

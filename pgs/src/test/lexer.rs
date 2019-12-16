@@ -6,7 +6,21 @@ use crate::{
 use logos::Logos;
 
 #[test]
-fn test_string_literal() {
+fn test_lex_comment() {
+    let lexer = Token::lexer("
+        // This is a comment
+        /*
+            This is a multiline comment
+        */
+        # ! This is a shebang line
+        this is normal text
+    ");
+
+    assert_eq!(lexer.token, Token::Text);
+}
+
+#[test]
+fn test_lex_string_literal() {
     let lexer = Token::lexer("\"This is a string literal.\"");
 
     assert_eq!(lexer.token, Token::StringLiteral);
@@ -14,7 +28,7 @@ fn test_string_literal() {
 }
 
 #[test]
-fn test_function_decl() {
+fn test_lex_function_decl() {
     let mut lexer = Token::lexer("fn main() {}");
 
     assert_eq!(lexer.token, Token::Fn);
