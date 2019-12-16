@@ -332,10 +332,14 @@ pub fn test_compile_fn_decl() {
 }
 
 #[test]
-fn test_compile_stmt_call() {
+fn test_compile_expr_call() {
     let code = String::from("
         fn: five() ~ int {
             return 5;
+        }
+        fn: main() ~ int {
+            var:int x = five();
+            return x;
         }
     ");
     
@@ -345,6 +349,7 @@ fn test_compile_stmt_call() {
 
     assert!(decl_list_res.is_ok());
     let decl_list = decl_list_res.unwrap();
+    
 
     let mut compiler = Compiler::new();
     compiler.reset_builder();
@@ -356,26 +361,58 @@ fn test_compile_stmt_call() {
 
     let mut comp_builder = Builder::new();
 
-    let pushi_instr = Instruction::new(Opcode::PUSHI)
-        .with_operand::<i64>(&5);
-    let svswp_instr = Instruction::new(Opcode::SVSWPI);
-    let popn_instr = Instruction::new(Opcode::POPN)
-        .with_operand::<u64>(&0);
-    let ldswp_instr = Instruction::new(Opcode::LDSWPI);
-    let ret_instr = Instruction::new(Opcode::RET);
-
-    comp_builder.push_instr(pushi_instr);
-    comp_builder.push_instr(svswp_instr);
-    comp_builder.push_instr(popn_instr);
-    comp_builder.push_instr(ldswp_instr);
-    comp_builder.push_instr(ret_instr);
-
-    println!("{:?}", compiler.builder.instructions);
-
     let five_uid = compiler.get_function_uid(&String::from("root::five"));
+    let main_uid = compiler.get_function_uid(&String::from("root::main"));
+
+    // five()
+    {
+        let pushi_instr = Instruction::new(Opcode::PUSHI)
+            .with_operand::<i64>(&5);
+        let svswp_instr = Instruction::new(Opcode::SVSWPI);
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand::<u64>(&0);
+        let ldswp_instr = Instruction::new(Opcode::LDSWPI);
+        let ret_instr = Instruction::new(Opcode::RET);
+
+        comp_builder.push_instr(pushi_instr);
+        comp_builder.push_instr(svswp_instr);
+        comp_builder.push_instr(popn_instr);
+        comp_builder.push_instr(ldswp_instr);
+        comp_builder.push_instr(ret_instr);
+    }
+    // main()
+    {
+        let call_instr = Instruction::new(Opcode::CALL)
+            .with_operand::<u64>(&five_uid);
+        let sdupi_instr = Instruction::new(Opcode::SDUPI)
+            .with_operand::<i64>(&-8);
+        let svswp_instr = Instruction::new(Opcode::SVSWPI);
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand::<u64>(&8);
+        let ldswp_instr = Instruction::new(Opcode::LDSWPI);
+        let ret_instr = Instruction::new(Opcode::RET);
+
+        comp_builder.push_instr(call_instr);
+        comp_builder.push_instr(sdupi_instr);
+        comp_builder.push_instr(svswp_instr);
+        comp_builder.push_instr(popn_instr);
+        comp_builder.push_instr(ldswp_instr);
+        comp_builder.push_instr(ret_instr);
+    }
+
+    println!("Comparison builder instructions:");
+    for instr in comp_builder.instructions.iter() {
+        println!("{:?}", instr);
+    }
+
+    println!("Compiler builder instructions:");
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+    }
 
     let comp_code = comp_builder.build();
     let mut fn_map = HashMap::new();
+    fn_map.insert(main_uid, 21);
     fn_map.insert(five_uid, 0);
     let comp_prog = Program::new()
         .with_code(comp_code)
@@ -387,6 +424,6 @@ fn test_compile_stmt_call() {
 }
 
 #[test]
-fn test_compile_expr_call() {
+fn test_compile_stmt_call() {
 
 }

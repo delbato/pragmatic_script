@@ -29,6 +29,11 @@ impl Instruction {
         self
     }
 
+    pub fn append_operand<T: Serialize>(&mut self, operand: &T) {
+        let mut data = serialize(operand).expect("ERROR Serializing operand!");
+        self.operands.append(&mut data);
+    }
+
     pub fn clear_operands(&mut self) {
         self.operands.clear();
     }

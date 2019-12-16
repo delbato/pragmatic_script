@@ -539,6 +539,8 @@ impl Parser {
 
         let expr = self.parse_expr(lexer, &[Token::Semicolon])?;
 
+        println!("Decl assignment expr: {:?}", expr);
+
         let var_decl_args = VariableDeclArgs {
             var_type: var_type,
             name: var_name,
@@ -701,16 +703,6 @@ impl Parser {
 
         while lexer.token != Token::End &&
             lexer.token != Token::Error {
-
-            // If Token is delimiter
-            if delims.contains(&lexer.token) {
-                // Special case if ")" is a delimiter
-                if lexer.token == Token::CloseParan && open_paran_count == 0 {
-                    break;
-                } else if lexer.token != Token::CloseParan {
-                    break; // Break if delim is hit
-                }
-            }
             
             if lexer.token == Token::Text {
                 let mut expr;
@@ -777,6 +769,17 @@ impl Parser {
                     operator_stack.pop_front();
                 }
             }
+
+            // If Token is delimiter
+            if delims.contains(&lexer.token) {
+                // Special case if ")" is a delimiter
+                if lexer.token == Token::CloseParan && open_paran_count == 0 {
+                    break;
+                } else if lexer.token != Token::CloseParan {
+                    break; // Break if delim is hit
+                }
+            }
+            
             lexer.advance();
         }
 

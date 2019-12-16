@@ -278,11 +278,15 @@ fn test_parse_call_expr() {
     use crate::parser::ast::Expression;
 
     let code = String::from("
-        add(5, 5)
+        add(5, 5);
     ");
     let mut lexer = Token::lexer(code.as_str());
     let parser = Parser::new(code.clone());
-    let expr_res = parser.try_parse_call_expr(&mut lexer);
+    let delims = [
+        Token::Semicolon
+    ];
+
+    let expr_res = parser.parse_expr(&mut lexer, &delims);
     assert!(expr_res.is_ok());
     if let Expression::Call(name, args) = expr_res.unwrap() {
         assert_eq!(name, String::from("add"));

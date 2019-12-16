@@ -107,3 +107,9 @@ impl ModuleContext {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct LoopContext {
+    pub instr_offset: usize,
+    pub instr_end: usize
+}

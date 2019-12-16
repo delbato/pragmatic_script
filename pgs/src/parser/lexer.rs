@@ -52,6 +52,9 @@ pub enum Token {
     #[regex = "([a-zA-Z_][a-zA-Z0-9_]*)"]
     Text,
 
+    #[regex = "(([a-zA-Z0-9_]::)*[a-zA-Z0-9_])"]
+    Identifier,
+
     #[regex = "[0-9]+"]
     IntLiteral,
 

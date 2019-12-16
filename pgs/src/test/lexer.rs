@@ -54,3 +54,14 @@ fn test_lex_function_decl() {
 
     assert_eq!(lexer.token, Token::CloseBlock);
 }
+
+#[test]
+fn test_lex_identifier() {
+    let code = "
+        root::some::other::module:and::function;
+    ";
+
+    let mut lexer = Token::lexer(code);
+
+    assert_eq!(lexer.token, Token::Identifier);
+}
