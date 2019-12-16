@@ -745,9 +745,20 @@ impl Parser {
 
         // Counter for handling ")" being used as delim
         let mut open_paran_count = 0;
+        let mut dec_paran_count = false;
 
         while lexer.token != Token::End &&
             lexer.token != Token::Error {
+
+            // If Token is delimiter
+            if delims.contains(&lexer.token) {
+                // Special case if ")" is a delimiter
+                if lexer.token == Token::CloseParan && open_paran_count == 0 {
+                    break;
+                } else if lexer.token != Token::CloseParan {
+                    break; // Break if delim is hit
+                }
+            }
             
             if lexer.token == Token::Text {
                 let mut expr;
@@ -801,7 +812,7 @@ impl Parser {
                     {
                         let op_ref = operator_stack.get(0).unwrap();
                         if *op_ref == Token::OpenParan {
-                            open_paran_count -= 1;
+                            dec_paran_count = true;
                             pop = true;
                             break;
                         }
@@ -823,6 +834,12 @@ impl Parser {
                 } else if lexer.token != Token::CloseParan {
                     break; // Break if delim is hit
                 }
+            }
+
+            // Workaround for properly decrementing open_paran_count
+            if dec_paran_count {
+                dec_paran_count = false;
+                open_paran_count -= 1;
             }
             
             lexer.advance();

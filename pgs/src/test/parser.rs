@@ -113,7 +113,7 @@ fn test_parse_decl_list() {
     ");
     let parser = Parser::new(code);
 
-    let decl_list_res = parser.parse_decl_list();
+    let decl_list_res = parser.parse_root_decl_list();
 
     assert!(decl_list_res.is_ok());
 
@@ -196,7 +196,7 @@ fn test_parse_full_fn() {
     ");
 
     let parser = Parser::new(code.clone());
-    let decl_list_res = parser.parse_decl_list();
+    let decl_list_res = parser.parse_root_decl_list();
     assert!(decl_list_res.is_ok());
 }
 
@@ -336,4 +336,32 @@ fn test_parse_complex_call_expr() {
             panic!("Wrong expression! Should be Addition.");
         }
     }
+}
+
+#[test]
+fn test_parse_mod_decl() {
+    let code = String::from("
+        mod: somemodule {
+            mod: nestedmodule {
+                fn: five() ~ int {
+                    return 5
+                }
+            }
+        }
+        mod: othermodule {
+            fn: multiply(lhs: int, rhs: int) ~ int {
+                return lhs * rhs;
+            }
+        }
+
+        fn: main() ~ int {
+            var:int five = somemodule::nestedmodule::five();
+            var:int fifty = othermodule::multiply(five, 10);
+            return fifty;
+        }
+    ");
+
+    let parser = Parser::new(code);
+    let decl_list_res = parser.parse_root_decl_list();
+    assert!(decl_list_res.is_ok());
 }

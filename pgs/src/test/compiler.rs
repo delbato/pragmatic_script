@@ -265,7 +265,7 @@ pub fn test_compile_fn_decl() {
 
     let mut lexer = Token::lexer(code.as_str());
     let parser = Parser::new(code.clone());
-    let decl_list_res = parser.parse_decl_list();
+    let decl_list_res = parser.parse_root_decl_list();
 
     assert!(decl_list_res.is_ok());
     let decl_list = decl_list_res.unwrap();
@@ -345,7 +345,7 @@ fn test_compile_expr_call() {
     
     let mut lexer = Token::lexer(code.as_str());
     let parser = Parser::new(code.clone());
-    let decl_list_res = parser.parse_decl_list();
+    let decl_list_res = parser.parse_root_decl_list();
 
     assert!(decl_list_res.is_ok());
     let decl_list = decl_list_res.unwrap();

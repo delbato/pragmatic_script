@@ -64,7 +64,7 @@ impl Engine {
 
     pub fn load_code(&mut self, code: &str) -> EngineResult<()> {
         let mut parser = Parser::new(String::from(code));
-        let decl_list = parser.parse_decl_list()
+        let decl_list = parser.parse_root_decl_list()
             .map_err(|_| EngineError::ParseError)?;
         self.compiler.compile_decl_list(decl_list)
             .map_err(|_| EngineError::CompileError)?;
