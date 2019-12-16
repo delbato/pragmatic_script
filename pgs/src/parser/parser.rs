@@ -55,7 +55,8 @@ pub enum ParseError {
     ExpectedMemberName,
     DuplicateMember,
     ExpectedImport,
-    ExpectedImportString
+    ExpectedImportString,
+    ExpectedMod
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -105,25 +106,69 @@ impl Parser {
         }
     }
 
-    pub fn parse_decl_list(&self) -> ParseResult<Vec<Declaration>> {
+    pub fn parse_decl_list(&self, lexer: &mut Lexer, delims: &[Token]) -> ParseResult<Vec<Declaration>> {
         let mut ret = Vec::new();
-        let mut lexer = Token::lexer(self.code.as_str());
-
-        while lexer.token != Token::End &&
+        
+        while !delims.contains(&lexer.token) &&
+            lexer.token != Token::End &&
             lexer.token != Token::Error {
             if lexer.token == Token::Fn {
-                ret.push(self.parse_fn_decl(&mut lexer)?);
+                ret.push(self.parse_fn_decl(lexer)?);
             }
             if lexer.token == Token::Struct {
-                ret.push(self.parse_struct_decl(&mut lexer)?);
+                ret.push(self.parse_struct_decl(lexer)?);
             }
             if lexer.token == Token::Import {
-                ret.push(self.parse_import_decl(&mut lexer)?);
+                ret.push(self.parse_import_decl(lexer)?);
+            }
+            if lexer.token == Token::Mod {
+                ret.push(self.parse_mod_decl(lexer)?);
             }
             lexer.advance();
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_root_decl_list(&self) -> ParseResult<Vec<Declaration>> {
+        let mut lexer = Token::lexer(self.code.as_str());
+        self.parse_decl_list(&mut lexer, &[])
+    }
+
+    pub fn parse_mod_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
+        if lexer.token != Token::Mod {
+            return Err(ParseError::ExpectedMod);
+        }
+        
+        lexer.advance();
+
+        if lexer.token != Token::Colon {
+            return Err(ParseError::ExpectedColon);
+        }
+
+        lexer.advance();
+
+        if lexer.token != Token::Text {
+            return Err(ParseError::ExpectedModName);
+        }
+
+        let mod_name = String::from(lexer.slice());
+
+        lexer.advance();
+
+        if lexer.token != Token::OpenBlock {
+            return Err(ParseError::ExpectedOpenBlock);
+        }
+
+        lexer.advance();
+
+        let decl_list = self.parse_decl_list(lexer, &[Token::CloseBlock])?;
+
+        lexer.advance();
+
+        Ok(
+            Declaration::Module(mod_name, decl_list)
+        )
     }
 
     pub fn parse_import_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
