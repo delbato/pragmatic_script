@@ -100,7 +100,8 @@ pub struct StructDeclArgs {
 pub enum Declaration {
     Function(FunctionDeclArgs),
     Module(String, Vec<Declaration>),
-    Struct(StructDeclArgs)
+    Struct(StructDeclArgs),
+    Import(String, String)
 }
 
 #[derive(PartialEq, Debug, Clone)]

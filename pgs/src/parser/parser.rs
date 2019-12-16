@@ -134,16 +134,6 @@ impl Parser {
         // Swallow "import"
         lexer.advance();
 
-        if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
-        }
-
-        // Swallow ":"
-        lexer.advance();
-        Err(ParseError::Unknown)
-    }
-
-    pub fn parse_import_string(&self, lexer: &mut Lexer) -> ParseResult<String> {
         let delims = &[
             Token::Semicolon,
             Token::Assign,
@@ -152,6 +142,7 @@ impl Parser {
         ];
 
         let mut import_string = String::new();
+        let mut import_string_end = String::new();
 
         while !delims.contains(&lexer.token) {
             if lexer.token != Token::Text {
@@ -159,21 +150,43 @@ impl Parser {
             }
 
             import_string += lexer.slice();
+            import_string_end = String::from(lexer.slice());
             // Swallow the name
             lexer.advance();
 
             if lexer.token != Token::DoubleColon {
                 break;
             }
+
+            import_string += "::";
+
+            // Swalow "::"
+            lexer.advance();
         }
-        
+        let mut import_as = import_string_end;
         if lexer.token == Token::Assign {
+            // Swallow "="
+            lexer.advance();
 
-        } else if lexer.token == Token::Semicolon {
+            if lexer.token != Token::Text {
+                return Err(ParseError::ExpectedImportString);
+            }
 
+            import_as = String::from(lexer.slice());
+            // Swallow import name
+            lexer.advance();
         }
 
-        Err(ParseError::Unknown)
+        if lexer.token != Token::Semicolon {
+            return Err(ParseError::ExpectedSemicolon);
+        }
+
+        // Swallow ";"
+        lexer.advance();
+
+        Ok(
+            Declaration::Import(import_string, import_as)
+        )
     }
 
     pub fn parse_fn_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
