@@ -12,7 +12,7 @@ fn test_lex_comment() {
         /*
             This is a multiline comment
         */
-        # ! This is a shebang line
+        #! This is a shebang line
         this is normal text
     ");
 
