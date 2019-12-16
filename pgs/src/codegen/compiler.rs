@@ -99,7 +99,7 @@ impl Compiler {
 
     pub fn push_default_module_context(&mut self) {
         self.mod_context_stack.push_front(
-            ModuleContext::new(String::from("global"))
+            ModuleContext::new(String::from("root"))
         );
     }
 
@@ -226,7 +226,8 @@ impl Compiler {
         match decl {
             Declaration::Function(_) => self.decl_fn_decl(decl)?,
             Declaration::Module(_, _) => self.decl_mod_decl(decl)?,
-            Declaration::Struct(_) => self.decl_struct_decl(decl)?
+            Declaration::Struct(_) => self.decl_struct_decl(decl)?,
+            _ => {}
         };
         Ok(())
     }
