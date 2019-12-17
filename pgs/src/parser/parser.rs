@@ -124,7 +124,7 @@ impl Parser {
             if lexer.token == Token::Mod {
                 ret.push(self.parse_mod_decl(lexer)?);
             }
-            lexer.advance();
+            //lexer.advance();
         }
 
         Ok(ret)
@@ -139,13 +139,14 @@ impl Parser {
         if lexer.token != Token::Mod {
             return Err(ParseError::ExpectedMod);
         }
-        
+        // Swallow "mod"
         lexer.advance();
 
         if lexer.token != Token::Colon {
             return Err(ParseError::ExpectedColon);
         }
 
+        // Swallow ":"
         lexer.advance();
 
         if lexer.token != Token::Text {
@@ -154,16 +155,19 @@ impl Parser {
 
         let mod_name = String::from(lexer.slice());
 
+        // Swallow mod name
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
             return Err(ParseError::ExpectedOpenBlock);
         }
 
+        // Swallow "{"
         lexer.advance();
 
         let decl_list = self.parse_decl_list(lexer, &[Token::CloseBlock])?;
 
+        // Swallow "}"
         lexer.advance();
 
         Ok(
@@ -307,6 +311,13 @@ impl Parser {
                 return Err(ParseError::ExpectedBlockOrSemicolon);
             }
         };
+
+        if lexer.token != Token::CloseBlock && lexer.token != Token::Semicolon {
+            return Err(ParseError::ExpectedBlockOrSemicolon);
+        }
+
+        // Swallow "}"|";"
+        lexer.advance();
 
         let fn_raw = FunctionDeclArgs {
             name: fn_name,

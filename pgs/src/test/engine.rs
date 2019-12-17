@@ -69,3 +69,38 @@ fn test_engine_call() {
 
     assert_eq!(pop_res.unwrap(), 50);
 }
+
+#[test]
+fn test_engine_mod_call() {
+    let code = "
+        mod: other {
+            fn: ten() ~ int {
+                return 10;
+            }
+        }
+
+        import other::ten = TEN;
+
+        fn: main(argc: int) ~ int {
+            var:int y = 0;
+            y = argc * TEN();
+            return y;
+        }
+    ";
+
+    let mut engine = Engine::new(1024);
+
+    let load_res = engine.load_code(code);
+    assert!(load_res.is_ok());
+
+    let push_res = engine.push_stack::<i64>(5);
+    assert!(push_res.is_ok());
+    
+    let run_res = engine.run_fn(&String::from("root::main"));
+    assert!(run_res.is_ok());
+
+    let pop_res = engine.pop_stack::<i64>();
+    assert!(pop_res.is_ok());
+
+    assert_eq!(pop_res.unwrap(), 50);
+}

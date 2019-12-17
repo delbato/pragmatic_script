@@ -66,7 +66,7 @@ impl Engine {
         let mut parser = Parser::new(String::from(code));
         let decl_list = parser.parse_root_decl_list()
             .map_err(|_| EngineError::ParseError)?;
-        self.compiler.compile_decl_list(decl_list)
+        self.compiler.compile_root_decl_list(decl_list)
             .map_err(|_| EngineError::CompileError)?;
         let program = self.compiler.get_program()
             .map_err(|_| EngineError::CompileError)?;

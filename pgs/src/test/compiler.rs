@@ -274,7 +274,7 @@ pub fn test_compile_fn_decl() {
     compiler.reset_builder();
     compiler.push_default_module_context();
     
-    let comp_res = compiler.compile_decl_list(decl_list);
+    let comp_res = compiler.compile_root_decl_list(decl_list);
     assert!(comp_res.is_ok());
     
 
@@ -355,13 +355,108 @@ fn test_compile_expr_call() {
     compiler.reset_builder();
     compiler.push_default_module_context();
     
-    let comp_res = compiler.compile_decl_list(decl_list);
+    let comp_res = compiler.compile_root_decl_list(decl_list);
     assert!(comp_res.is_ok());
     
 
     let mut comp_builder = Builder::new();
 
     let five_uid = compiler.get_function_uid(&String::from("root::five"));
+    let main_uid = compiler.get_function_uid(&String::from("root::main"));
+
+    // five()
+    {
+        let pushi_instr = Instruction::new(Opcode::PUSHI)
+            .with_operand::<i64>(&5);
+        let svswp_instr = Instruction::new(Opcode::SVSWPI);
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand::<u64>(&0);
+        let ldswp_instr = Instruction::new(Opcode::LDSWPI);
+        let ret_instr = Instruction::new(Opcode::RET);
+
+        comp_builder.push_instr(pushi_instr);
+        comp_builder.push_instr(svswp_instr);
+        comp_builder.push_instr(popn_instr);
+        comp_builder.push_instr(ldswp_instr);
+        comp_builder.push_instr(ret_instr);
+    }
+    // main()
+    {
+        let call_instr = Instruction::new(Opcode::CALL)
+            .with_operand::<u64>(&five_uid);
+        let sdupi_instr = Instruction::new(Opcode::SDUPI)
+            .with_operand::<i64>(&-8);
+        let svswp_instr = Instruction::new(Opcode::SVSWPI);
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand::<u64>(&8);
+        let ldswp_instr = Instruction::new(Opcode::LDSWPI);
+        let ret_instr = Instruction::new(Opcode::RET);
+
+        comp_builder.push_instr(call_instr);
+        comp_builder.push_instr(sdupi_instr);
+        comp_builder.push_instr(svswp_instr);
+        comp_builder.push_instr(popn_instr);
+        comp_builder.push_instr(ldswp_instr);
+        comp_builder.push_instr(ret_instr);
+    }
+
+    println!("Comparison builder instructions:");
+    for instr in comp_builder.instructions.iter() {
+        println!("{:?}", instr);
+    }
+
+    println!("Compiler builder instructions:");
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+    }
+
+    let comp_code = comp_builder.build();
+    let mut fn_map = HashMap::new();
+    fn_map.insert(main_uid, 21);
+    fn_map.insert(five_uid, 0);
+    let comp_prog = Program::new()
+        .with_code(comp_code)
+        .with_functions(fn_map);
+    let program_res = compiler.get_program();
+    assert!(program_res.is_ok());
+    let program = program_res.unwrap();
+    assert_eq!(program, comp_prog);
+}
+
+#[test]
+fn test_compile_expr_call_mod() {
+    let code = String::from("
+        mod: other {
+            fn: five() ~ int {
+                return 5;
+            }
+        }
+        import other::five;
+        fn: main() ~ int {
+            var:int x = five();
+            return x;
+        }
+    ");
+    
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+    let decl_list_res = parser.parse_root_decl_list();
+
+    assert!(decl_list_res.is_ok());
+    let decl_list = decl_list_res.unwrap();
+    
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_default_module_context();
+    
+    let comp_res = compiler.compile_root_decl_list(decl_list);
+    assert!(comp_res.is_ok());
+    
+
+    let mut comp_builder = Builder::new();
+
+    let five_uid = compiler.get_function_uid(&String::from("root::other::five"));
     let main_uid = compiler.get_function_uid(&String::from("root::main"));
 
     // five()

@@ -51,6 +51,7 @@ pub enum CompilerError {
     Unknown,
     UnknownType,
     UnknownFunction,
+    UnknownModule,
     NotImplemented,
     UnknownVariable,
     TypeMismatch,
@@ -105,6 +106,7 @@ impl Compiler {
     pub fn resolve_fn(&self, name: &String) -> CompilerResult<(u64, Type, BTreeMap<usize, (String, Type)>)> {
         // If directly accessing via module namespace
         if name.contains("::") {
+            println!("Module accessor!");
             let path = self.get_module_path(&name);
 
             let mut mod_ctx;
@@ -119,18 +121,25 @@ impl Compiler {
             }
             // Module access relative to this current module
             else {
+                println!("Accessing from current module...");
                 mod_ctx = self.get_current_module()?;
                 offset = 0;
             }
 
+            let canonical_fn_name = String::from(path[path.len() - 1]);
+
             // Iterate from the offset (in case of super and root, 1)  
             // To the second last element (as the last is the function name)
             for i in offset..path.len() - 1 {
-                mod_ctx = mod_ctx.modules.get(&String::from(path[i]))
+                let mod_name = path[i];
+                mod_ctx = mod_ctx.modules.get(&String::from(mod_name))
                     .ok_or(CompilerError::Unknown)?;
             }
 
-            return mod_ctx.functions.get(name)
+            println!("Getting function {} from module {}...", canonical_fn_name, mod_ctx.name);
+            println!("Module {} fn decls: {}", mod_ctx.name, mod_ctx.functions.len());
+
+            return mod_ctx.functions.get(&canonical_fn_name)
                 .cloned()
                 .ok_or(CompilerError::UnknownFunction);
         }
@@ -236,13 +245,7 @@ impl Compiler {
     }
 
     pub fn type_of_fn(&self, fn_name: &String) -> CompilerResult<Type> {
-        let fn_type = {
-            let front_mod_ctx = self.mod_context_stack.get(0)
-                .ok_or(CompilerError::Unknown)?;
-            let fun = front_mod_ctx.functions.get(fn_name)
-                .ok_or(CompilerError::Unknown)?;
-            fun.1.clone()
-        };
+        let (_, fn_type, _) = self.resolve_fn(fn_name)?;
         Ok(
             fn_type
         )
@@ -319,9 +322,14 @@ impl Compiler {
     }
 
     pub fn decl_decl_list(&mut self, decl_list: &Vec<Declaration>) -> CompilerResult<()> {
+        let mod_name = {
+            self.get_current_module()?.name.clone()
+        };
+        println!("Declaring decl list for current module {}...", mod_name);
         for decl in decl_list.iter() {
             self.decl_decl(decl)?;
         }
+        println!("Done declaring decl list for current module {}.", mod_name);
         Ok(())
     }
 
@@ -342,6 +350,12 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
+        let mod_name = {
+            self.get_current_module()?.name.clone()
+        };
+
+        println!("Declaring import({} as {}) for current module {}!", import_path, import_name, mod_name);
+
         let mod_ctx = self.get_current_module_mut()?;
         mod_ctx.imports.insert(import_name, import_path);
 
@@ -355,6 +369,12 @@ impl Compiler {
         };
         let full_fn_name = self.get_full_function_name(&fn_decl_args.name);
         let uid = self.get_function_uid(&full_fn_name);
+
+        let mod_name = {
+            self.get_current_module()?.name.clone()
+        };
+
+        println!("Declaring function {} with uid {} for current module {}!", fn_decl_args.name, uid, mod_name);
 
         let fn_tuple = (uid, fn_decl_args.returns.clone(), fn_decl_args.arguments.clone());
 
@@ -393,6 +413,10 @@ impl Compiler {
             Declaration::Module(mod_name, decl_list) => (mod_name, decl_list),
             _ => return Err(CompilerError::Unknown)
         };
+        let old_mod_name = {
+            self.get_current_module()?.name.clone()
+        };
+        println!("Declaring module {} for current module {}!", mod_name, old_mod_name);
         let mut mod_context = ModuleContext::new(mod_name.clone());
         self.mod_context_stack.push_front(mod_context);
         self.decl_decl_list(decl_list)?;
@@ -409,8 +433,13 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_decl_list(&mut self, decl_list: Vec<Declaration>) -> CompilerResult<()> {
+    pub fn compile_root_decl_list(&mut self, decl_list: Vec<Declaration>) -> CompilerResult<()> {
         self.decl_decl_list(&decl_list)?;
+        self.compile_decl_list(decl_list)?;
+        Ok(())
+    }
+
+    pub fn compile_decl_list(&mut self, decl_list: Vec<Declaration>) -> CompilerResult<()> {
         for decl in decl_list {
             self.compile_decl(decl)?;
         }
@@ -422,6 +451,20 @@ impl Compiler {
             Declaration::Function(_) => {
                 self.compile_fn_decl(decl)?;
             },
+            Declaration::Module(name, decl_list) => {
+                let mod_ctx =  {
+                    let front_mod_ctx = self.get_current_module()?;
+                    front_mod_ctx.modules.get(&name)
+                        .cloned()
+                        .ok_or(CompilerError::UnknownModule)?
+                };
+                println!("Compiling module {} with {} function declarations!", mod_ctx.name, mod_ctx.functions.len());
+                self.mod_context_stack.push_front(mod_ctx);
+                self.compile_decl_list(decl_list)?;
+                self.mod_context_stack.pop_front();
+            },
+            Declaration::Import(_, _) => {},
+            Declaration::Struct(_) => {},
             _ => {
                 return Err(CompilerError::Unknown);
             }
@@ -494,20 +537,14 @@ impl Compiler {
             }
         };
 
-        let fn_decl_args = {
-            self.global_context.functions.get(&fn_name)
-                .ok_or(CompilerError::UnknownFunction)?
-                .clone()
-        };
-
-        let fn_uid = self.get_function_uid(&fn_name);
+        let (fn_uid, fn_ret_type, fn_args) = self.resolve_fn(&fn_name)?;
         
-        let fn_arg_req_len = fn_decl_args.arguments.len();
+        let fn_arg_req_len = fn_args.len();
         if params.len() != fn_arg_req_len {
             return Err(CompilerError::InvalidArgumentCount);
         }
         let mut call_stack_diff = 0;
-        for (i, (var_name, var_type)) in fn_decl_args.arguments.iter() {
+        for (i, (var_name, var_type)) in fn_args.iter() {
             let arg_type = {
                 let checker = Checker::new(self);
                 checker.check_expr_type(&params[*i])
@@ -524,7 +561,7 @@ impl Compiler {
         self.builder.push_instr(call_instr);
 
 
-        let size = self.size_of_type(&fn_decl_args.returns)?;
+        let size = self.size_of_type(&fn_ret_type)?;
 
         let front_context = self.fn_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
@@ -689,8 +726,7 @@ impl Compiler {
         let front_mod_ctx = self.mod_context_stack.get(0)
             .ok_or(CompilerError::Unknown)?;
         
-        let (fn_uid, fn_ret_type, fn_args) = front_mod_ctx.functions.get(name)
-            .ok_or(CompilerError::UnknownFunction)?;
+        let (fn_uid, fn_ret_type, fn_args) = self.resolve_fn(name)?;
         
         for (_, (var_name, var_type)) in fn_args.iter() {
             let var_offset = {
@@ -707,7 +743,7 @@ impl Compiler {
             front_context.stack_size += 8;
         }
         let call_instr = Instruction::new(Opcode::CALL)
-            .with_operand(fn_uid);
+            .with_operand(&fn_uid);
         self.builder.push_instr(call_instr);
 
         let front_context = self.fn_context_stack.get_mut(0)
