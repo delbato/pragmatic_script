@@ -599,3 +599,29 @@ fn test_compile_if_stmt_list() {
 
     println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }
+
+#[test]
+fn test_compile_if_neg() {
+    let code = String::from("
+        if 1 + 1 {
+            var:int x = 1;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let if_stmt_res = parser.parse_if(&mut lexer);
+    assert!(if_stmt_res.is_ok());
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let if_stmt = if_stmt_res.unwrap();
+
+    let cmp_res = compiler.compile_if_stmt(&if_stmt);
+
+    assert!(cmp_res.is_err());
+}
