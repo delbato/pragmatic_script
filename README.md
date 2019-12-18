@@ -2,7 +2,7 @@
 
 A pragmatic scripting language
 
-### <i>! This is all very heavily WIP. Does not work properly yet.!</i>
+### <i>! This is all very heavily WIP. Does not work properly yet !</i>
 
 ## What is this?
 
