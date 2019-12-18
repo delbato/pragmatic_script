@@ -27,6 +27,7 @@ use logos::{
 #[derive(Debug)]
 pub enum ParseError {
     Unknown,
+    Unimplemented,
     EmptyInput,
     FnMissing,
     OpenParanMissing,
@@ -56,7 +57,8 @@ pub enum ParseError {
     DuplicateMember,
     ExpectedImport,
     ExpectedImportString,
-    ExpectedMod
+    ExpectedMod,
+    ExpectedIf
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -71,6 +73,13 @@ fn is_op(token: &Token) -> bool {
         Token::Divide => true,
         Token::Plus => true,
         Token::Minus => true,
+        Token::Equals => true,
+        Token::NotEquals => true,
+        Token::GreaterThan => true,
+        Token::GreaterThanEquals => true,
+        Token::LessThan => true,
+        Token::LessThanEquals => true,
+        Token::Not => true,
         _ => false
     }
 }
@@ -79,8 +88,15 @@ fn op_prec(token: &Token) -> i8 {
     match token {
         Token::Times => 2,
         Token::Divide => 2,
-        Token::Plus => 0,
-        Token::Minus => 0,
+        Token::Plus => 1,
+        Token::Minus => 1,
+        Token::Equals => 0,
+        Token::NotEquals => 0,
+        Token::GreaterThan => 0,
+        Token::GreaterThanEquals => 0,
+        Token::LessThan => 0,
+        Token::LessThanEquals => 0,
+        Token::Not => 3,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -93,6 +109,13 @@ fn is_op_right_assoc(token: &Token) -> bool {
         Token::Divide => false,
         Token::Plus => false,
         Token::Minus => false,
+        Token::Equals => false,
+        Token::NotEquals => false,
+        Token::GreaterThan => false,
+        Token::GreaterThanEquals => false,
+        Token::LessThan => false,
+        Token::LessThanEquals => false,
+        Token::Not => true,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -115,8 +138,8 @@ impl Parser {
             if lexer.token == Token::Fn {
                 ret.push(self.parse_fn_decl(lexer)?);
             }
-            if lexer.token == Token::Struct {
-                ret.push(self.parse_struct_decl(lexer)?);
+            if lexer.token == Token::Container {
+                ret.push(self.parse_container_decl(lexer)?);
             }
             if lexer.token == Token::Import {
                 ret.push(self.parse_import_decl(lexer)?);
@@ -202,6 +225,13 @@ impl Parser {
             import_string_end = String::from(lexer.slice());
             // Swallow the name
             lexer.advance();
+
+            // Work around Logos being broken
+            if import_string_end.len() == 1 && lexer.token == Token::Text {
+                import_string += lexer.slice();
+                import_string_end += lexer.slice();
+                lexer.advance();
+            }
 
             if lexer.token != Token::DoubleColon {
                 break;
@@ -397,8 +427,8 @@ impl Parser {
         )
     }
 
-    pub fn parse_struct_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
-        if lexer.token != Token::Struct {
+    pub fn parse_container_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
+        if lexer.token != Token::Container {
             return Err(ParseError::Unknown);
         }
 
@@ -416,9 +446,9 @@ impl Parser {
             return Err(ParseError::ExpectedStructName);
         }
 
-        let struct_name = String::from(lexer.slice());
+        let container_name = String::from(lexer.slice());
 
-        // Swallow struct name
+        // Swallow container name
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
@@ -428,22 +458,22 @@ impl Parser {
         // Swallow "{"
         lexer.advance();
 
-        let members = self.parse_struct_members(lexer)?;
+        let members = self.parse_container_members(lexer)?;
 
         // Swallow "}"
         lexer.advance();
 
-        let struct_args = StructDeclArgs {
-            name: struct_name,
+        let container_args = ContainerDeclArgs {
+            name: container_name,
             members: members
         };
 
         Ok(
-            Declaration::Struct(struct_args)
+            Declaration::Container(container_args)
         )
     }
 
-    pub fn parse_struct_members(&self, lexer: &mut Lexer) -> ParseResult<BTreeMap<usize, (String, Type)>> {
+    pub fn parse_container_members(&self, lexer: &mut Lexer) -> ParseResult<BTreeMap<usize, (String, Type)>> {
         let mut ret = BTreeMap::new();
         let mut members = HashSet::new();
         let mut member_index = 0;
@@ -451,7 +481,7 @@ impl Parser {
             lexer.token != Token::End &&
             lexer.token != Token::Error {
             
-            let member = self.parse_struct_member(lexer)?;
+            let member = self.parse_container_member(lexer)?;
             if members.contains(&member.0) {
                 return Err(ParseError::DuplicateMember);
             }
@@ -463,7 +493,7 @@ impl Parser {
         Ok(ret)
     }
 
-    pub fn parse_struct_member(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
+    pub fn parse_container_member(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
         if lexer.token != Token::Text {
             return Err(ParseError::ExpectedMemberName);
         }
@@ -472,12 +502,10 @@ impl Parser {
         // Swallow member name
         lexer.advance();
 
-        if member_name.starts_with("i") ||
-            member_name.starts_with("b") ||
-            member_name.starts_with("s") ||
-            member_name.starts_with("f") {
+        // Workaround for logos being broken
+        if member_name.len() == 1 && lexer.token == Token::Text {
             member_name += lexer.slice();
-            lexer.advance(); // Workaround for bug in Logos
+            lexer.advance();
         }
 
         if lexer.token != Token::Colon {
@@ -514,6 +542,43 @@ impl Parser {
         )
     }
 
+    pub fn parse_loop(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        Err(ParseError::Unimplemented)
+    }
+
+    pub fn parse_while(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        Err(ParseError::Unimplemented)
+    }
+
+    pub fn parse_if(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        if lexer.token != Token::If {
+            return Err(ParseError::ExpectedIf);
+        }
+        // Swallow "if"
+        lexer.advance();
+
+        let if_expr = self.parse_expr(lexer, &[
+            Token::OpenBlock,
+            Token::Semicolon
+        ])?;
+
+        if lexer.token != Token::OpenBlock {
+            return Err(ParseError::ExpectedOpenBlock);
+        }
+
+        // Swallow "{"
+        lexer.advance();
+
+        let stmt_list = self.parse_statement_list(lexer)?;
+
+        // Swallow "}"
+        lexer.advance();
+
+        Ok(
+            Statement::If(Box::new(if_expr), stmt_list)
+        )
+    }
+
     pub fn parse_statement_list(&self, lexer: &mut Lexer) -> ParseResult<Vec<Statement>> {
         let mut ret = Vec::new();
 
@@ -529,6 +594,9 @@ impl Parser {
                 },
                 Token::Return => {
                     ret.push(self.parse_return(lexer)?);
+                },
+                Token::If => {
+                    ret.push(self.parse_if(lexer)?);
                 },
                 _ => {
                     return Err(ParseError::UnknownStatement);
@@ -701,6 +769,40 @@ impl Parser {
                 let lhs = operand_stack.pop_front().unwrap();
                 Expression::Division(Box::new(lhs), Box::new(rhs))
             },
+            Token::Equals => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::Equals(Box::new(lhs), Box::new(rhs))
+            },
+            Token::NotEquals => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::NotEquals(Box::new(lhs), Box::new(rhs))
+            },
+            Token::GreaterThan => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::GreaterThan(Box::new(lhs), Box::new(rhs))
+            },
+            Token::GreaterThanEquals => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::GreaterThanEquals(Box::new(lhs), Box::new(rhs))
+            },
+            Token::LessThan => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::LessThan(Box::new(lhs), Box::new(rhs))
+            },
+            Token::LessThanEquals => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::LessThanEquals(Box::new(lhs), Box::new(rhs))
+            },
+            Token::Not => {
+                let op = operand_stack.pop_front().unwrap();
+                Expression::Not(Box::new(op))
+            },
             _ => {
                 return Err(ParseError::UnsupportedExpression);
             }
@@ -769,6 +871,16 @@ impl Parser {
                 } else if lexer.token != Token::CloseParan {
                     break; // Break if delim is hit
                 }
+            }
+
+            if lexer.token == Token::True {
+                let expr = Expression::BoolLiteral(true);
+                operand_stack.push_front(expr);
+            }
+
+            if lexer.token == Token::False {
+                let expr = Expression::BoolLiteral(false);
+                operand_stack.push_front(expr);
             }
             
             if lexer.token == Token::Text {

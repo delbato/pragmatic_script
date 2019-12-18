@@ -11,6 +11,9 @@ use crate::{
             Type,
             FunctionDeclArgs
         }
+    },
+    codegen::{
+        container::Container
     }
 };
 
@@ -92,7 +95,7 @@ pub struct ModuleContext {
     pub name: String,
     pub modules: HashMap<String, ModuleContext>,
     pub functions: HashMap<String, (u64, Type, BTreeMap<usize, (String, Type)>)>,
-    pub structs: HashMap<String, BTreeMap<usize, (String, Type)>>,
+    pub containers: HashMap<String, Container>,
     pub imports: HashMap<String, String>
 }
 
@@ -101,7 +104,7 @@ impl ModuleContext {
         ModuleContext {
             name: name,
             modules: HashMap::new(),
-            structs: HashMap::new(),
+            containers: HashMap::new(),
             functions: HashMap::new(),
             imports: HashMap::new()
         }
@@ -110,6 +113,12 @@ impl ModuleContext {
 
 #[derive(Clone)]
 pub struct LoopContext {
+    pub instr_offset: usize,
+    pub instr_end: usize
+}
+
+#[derive(Clone)]
+pub struct IfContext {
     pub instr_offset: usize,
     pub instr_end: usize
 }

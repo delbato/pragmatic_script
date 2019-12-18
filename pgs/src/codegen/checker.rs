@@ -76,7 +76,8 @@ impl<'c> Checker<'c> {
                 lhs_type
             },
             Expression::Not(expr) => {
-                self.check_expr_type(expr)?
+                self.check_expr_type(expr)?;
+                Type::Bool
             },
             Expression::Equals(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -84,7 +85,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
             Expression::NotEquals(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -92,7 +93,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
             Expression::GreaterThan(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -100,7 +101,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
             Expression::LessThan(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -108,7 +109,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
             Expression::GreaterThanEquals(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -116,7 +117,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
             Expression::LessThanEquals(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -124,7 +125,7 @@ impl<'c> Checker<'c> {
                 if lhs_type != rhs_type {
                     return Err(CheckerError::TypeMismatch);
                 }
-                lhs_type
+                Type::Bool
             },
         })
     } 

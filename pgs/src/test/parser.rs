@@ -29,7 +29,7 @@ fn test_parse_import_decl() {
 #[test]
 fn test_neg_parse_struct_decl() {
     let code = String::from("
-        struct: Integer {
+        cont: Integer {
             inner: int;
             inner: int;
         }
@@ -38,14 +38,14 @@ fn test_neg_parse_struct_decl() {
     let mut lexer = Token::lexer(code.as_str());
     let parser = Parser::new(code.clone());
 
-    let decl_res = parser.parse_struct_decl(&mut lexer);
+    let decl_res = parser.parse_container_decl(&mut lexer);
     assert!(decl_res.is_err());
 }
 
 #[test]
-fn test_parse_struct_decl() {
+fn test_parse_container_decl() {
     let code = String::from("
-        struct: Integer {
+        cont: Integer {
             inner: int;
         }
     ");
@@ -53,7 +53,7 @@ fn test_parse_struct_decl() {
     let mut lexer = Token::lexer(code.as_str());
     let parser = Parser::new(code.clone());
 
-    let decl_res = parser.parse_struct_decl(&mut lexer);
+    let decl_res = parser.parse_container_decl(&mut lexer);
     assert!(decl_res.is_ok());
 }
 
@@ -364,4 +364,22 @@ fn test_parse_mod_decl() {
     let parser = Parser::new(code);
     let decl_list_res = parser.parse_root_decl_list();
     assert!(decl_list_res.is_ok());
+}
+
+#[test]
+fn test_parse_if() {
+    let code = String::from("
+        if true {
+            var:int x = 0;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_if(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    if let Statement::If(expr_box, stmt_list) = stmt_res.unwrap() {
+        println!("if expr: {:?}", *expr_box);
+    }
 }

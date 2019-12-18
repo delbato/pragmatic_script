@@ -19,8 +19,8 @@ pub enum Token {
     #[token = "fn"]
     Fn,
 
-    #[token = "struct"]
-    Struct,
+    #[token = "cont"]
+    Container,
 
     #[token = "var"]
     Var,
@@ -40,6 +40,15 @@ pub enum Token {
     #[token = "string"]
     String,
 
+    #[token = "for"]
+    For,
+
+    #[token = "loop"]
+    Loop,
+
+    #[token = "while"]
+    While,
+
     #[token = "bool"]
     Bool,
 
@@ -48,6 +57,15 @@ pub enum Token {
 
     #[token = "false"]
     False,
+
+    #[token = "if"]
+    If,
+
+    #[token = "!"]
+    Not,
+
+    #[token = "else"]
+    Else,
 
     #[regex = "([a-zA-Z_][a-zA-Z0-9_]*)"]
     Text,
@@ -97,7 +115,7 @@ pub enum Token {
     #[token = "*"]
     Times,
 
-    #[token = "ö"]
+    #[token = "/"]
     Divide,
 
     #[token = "=="]

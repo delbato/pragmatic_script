@@ -16,7 +16,11 @@ use super::{
         FunctionContext,
         ModuleContext
     },
-    program::Program
+    program::Program,
+    container::{
+        Container,
+        ContainerMember
+    }
 };
 
 use std::{
@@ -41,7 +45,8 @@ pub struct Compiler {
     pub builder: Builder,
     function_uid_map: HashMap<String, u64>,
     function_uid_set: HashSet<u64>,
-    loop_uid_set: HashSet<u64>
+    loop_uid_set: HashSet<u64>,
+    tag_set: HashSet<u64>
 }
 
 pub type CompilerResult<T> = Result<T, CompilerError>;
@@ -52,6 +57,7 @@ pub enum CompilerError {
     UnknownType,
     UnknownFunction,
     UnknownModule,
+    UnknownContainer,
     NotImplemented,
     UnknownVariable,
     TypeMismatch,
@@ -59,6 +65,7 @@ pub enum CompilerError {
     DuplicateModule,
     DuplicateStruct,
     InvalidArgumentCount,
+    IfOnlyAcceptsBooleanExpressions
 }
 
 impl Compiler {
@@ -70,7 +77,8 @@ impl Compiler {
             builder: Builder::new(),
             function_uid_map: HashMap::new(),
             function_uid_set: HashSet::new(),
-            loop_uid_set: HashSet::new()
+            loop_uid_set: HashSet::new(),
+            tag_set: HashSet::new()
         };
         comp
     }
@@ -87,6 +95,61 @@ impl Compiler {
         let mut context = FunctionContext::new();
         context.stack_size = stack_size;
         self.fn_context_stack.push_front(context);
+    }
+
+    pub fn resolve_cont(&self, name: &String) -> CompilerResult<Container> {
+        // If directly accessing via module namespace
+        if name.contains("::") {
+            println!("Module accessor!");
+            let path = self.get_module_path(&name);
+
+            let mut mod_ctx;
+            let mut offset = 1;
+            // Module access relative to the root module
+            if path[0] == "root" {
+                mod_ctx = self.get_root_module()?;
+            }
+            // Module access relative to this current modules parent
+            else if path[0] == "super" {
+                mod_ctx = self.get_super_module()?;
+            }
+            // Module access relative to this current module
+            else {
+                println!("Accessing from current module...");
+                mod_ctx = self.get_current_module()?;
+                offset = 0;
+            }
+
+            let canonical_cont_name = String::from(path[path.len() - 1]);
+
+            // Iterate from the offset (in case of super and root, 1)  
+            // To the second last element (as the last is the function name)
+            for i in offset..path.len() - 1 {
+                let mod_name = path[i];
+                mod_ctx = mod_ctx.modules.get(&String::from(mod_name))
+                    .ok_or(CompilerError::Unknown)?;
+            }
+
+            mod_ctx.containers.get(&canonical_cont_name)
+                .cloned()
+                .ok_or(CompilerError::UnknownContainer)
+        }
+        // If accessing relative to this module
+        else {
+            let mod_ctx = self.get_current_module()?;
+            // If declared in this module
+            if let Some(cont) = mod_ctx.containers.get(name) {
+                return Ok(cont.clone());
+            }
+            // If imported from other module
+            else if let Some(module_path) = mod_ctx.imports.get(name) {
+                return self.resolve_cont(module_path);
+            }
+            // Otherwise, the function is unknown.
+            else {
+                return Err(CompilerError::UnknownFunction);
+            }
+        }
     }
 
     /// # Resolves a function name to the relevant data
@@ -161,6 +224,49 @@ impl Compiler {
         }
     }
 
+    pub fn get_parent_fn(&self) -> CompilerResult<(usize, &FunctionContext)> {
+        let mut fn_opt = None;
+
+        let mut index = 0;
+
+        for i in 0..self.fn_context_stack.len() {
+            fn_opt = self.fn_context_stack.get(i);
+            
+            if let Some(fn_context) = fn_opt {
+                if !fn_context.weak {
+                    index = i;
+                    break;
+                }
+            }
+        }
+
+        let ctx = fn_opt.ok_or(CompilerError::UnknownFunction)?;
+        Ok((index, ctx))
+    }
+
+    pub fn get_parent_fn_mut(&mut self) -> CompilerResult<(usize, &mut FunctionContext)> {
+        let mut fn_opt = None;
+
+        /*
+        let mut index = 0;
+
+        for i in 0..self.fn_context_stack.len() {
+            let fn_opt_temp = self.fn_context_stack.get_mut(i);
+            
+            if let Some(fn_context) = fn_opt_temp {
+                if !fn_context.weak {
+                    index = i;
+                    fn_opt = fn_opt_temp;
+                    break;
+                }
+            }
+        }
+        */
+
+        let ctx = fn_opt.ok_or(CompilerError::UnknownFunction)?;
+        Ok((0, ctx))
+    }
+
     pub fn get_module_path<'s>(&self, name: &'s String) -> Vec<&'s str> {
         name.split("::").collect()
     }
@@ -229,6 +335,7 @@ impl Compiler {
             Type::Float => 4,
             Type::String => 8,
             Type::Bool => 1,
+            Type::Reference(_) => 8,
             _ => {
                 return Err(CompilerError::UnknownType);
             }
@@ -277,6 +384,15 @@ impl Compiler {
             .with_functions(functions);
 
         Ok(program)
+    }
+
+    pub fn get_tag(&mut self) -> u64 {
+        let mut rng = thread_rng();
+        let mut tag = rng.next_u64();
+        while self.tag_set.contains(&tag) {
+            tag = rng.next_u64();
+        }
+        tag
     }
 
     pub fn get_function_uid(&mut self, function_name: &String) -> u64 {
@@ -337,7 +453,7 @@ impl Compiler {
         match decl {
             Declaration::Function(_) => self.decl_fn_decl(decl)?,
             Declaration::Module(_, _) => self.decl_mod_decl(decl)?,
-            Declaration::Struct(_) => self.decl_struct_decl(decl)?,
+            Declaration::Container(_) => self.decl_cont_decl(decl)?,
             Declaration::Import(_, _) => self.decl_import_decl(decl)?,
             _ => {}
         };
@@ -389,18 +505,24 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn decl_struct_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
-        let struct_decl_args = match decl {
-            Declaration::Struct(struct_decl_args) => struct_decl_args,
+    pub fn decl_cont_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
+        let cont_decl_args = match decl {
+            Declaration::Container(cont_decl_args) => cont_decl_args,
             _ => return Err(CompilerError::Unknown)
         };
 
-        let struct_name = struct_decl_args.name.clone();
+        let cont_name = cont_decl_args.name.clone();
         
         let front_mod_ctx = self.mod_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
 
-        let insert_opt = front_mod_ctx.structs.insert(struct_name, struct_decl_args.members.clone());
+        let mut container = Container::new(cont_name.clone());
+        for (i, (var_name, var_type)) in cont_decl_args.members.iter() {
+            let member = ContainerMember::new(var_name.clone(), var_type.clone());
+            container.members.insert(*i, member);
+        }
+
+        let insert_opt = front_mod_ctx.containers.insert(cont_name, container);
         if insert_opt.is_some() {
             return Err(CompilerError::DuplicateStruct);
         }
@@ -464,7 +586,7 @@ impl Compiler {
                 self.mod_context_stack.pop_front();
             },
             Declaration::Import(_, _) => {},
-            Declaration::Struct(_) => {},
+            Declaration::Container(_) => {},
             _ => {
                 return Err(CompilerError::Unknown);
             }
@@ -498,7 +620,7 @@ impl Compiler {
 
         if let Some(statements) = fn_decl_args.code_block {
             for statement in statements {
-                self.compile_statement(statement)?;
+                self.compile_statement(&statement)?;
             }
         }
 
@@ -507,7 +629,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_statement(&mut self, stmt: Statement) -> CompilerResult<()> {
+    pub fn compile_statement(&mut self, stmt: &Statement) -> CompilerResult<()> {
         match stmt {
             Statement::VariableDecl(_) => {
                 self.compile_var_decl_stmt(stmt)?
@@ -521,6 +643,9 @@ impl Compiler {
             Statement::Call(_, _) => {
                 self.compile_call_stmt(stmt)?;
             },
+            Statement::If(_, _) => {
+                self.compile_if_stmt(stmt)?;  
+            },
             _ => {
                 return Err(CompilerError::NotImplemented);
             }
@@ -529,7 +654,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_call_stmt(&mut self, stmt: Statement) -> CompilerResult<()> {
+    pub fn compile_call_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
         let (fn_name, params) = match stmt {
             Statement::Call(fn_name, params) => (fn_name, params),
             _ => {
@@ -572,7 +697,7 @@ impl Compiler {
         Ok(())
     }
     
-    pub fn compile_return_stmt(&mut self, stmt: Statement) -> CompilerResult<()> {
+    pub fn compile_return_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
         let ret_expr = match stmt {
             Statement::Return(expr) => expr,
             _ => return Err(CompilerError::Unknown)
@@ -582,8 +707,9 @@ impl Compiler {
         let expr_type = checker.check_expr_type(&ret_expr)
             .map_err(|_| CompilerError::TypeMismatch)?;
 
-        let fn_type = self.fn_context_stack.get(0)
-            .ok_or(CompilerError::Unknown)?
+        let (fn_index, fn_ctx) = self.get_parent_fn()?;
+
+        let fn_type = fn_ctx
             .return_type
             .as_ref()
             .ok_or(CompilerError::TypeMismatch)?
@@ -612,12 +738,17 @@ impl Compiler {
         };
 
         let size = self.size_of_type(&fn_type)?;
-        let stack_size = {
-            let front_context = self.fn_context_stack.get_mut(0)
-                .ok_or(CompilerError::Unknown)?;
-            front_context.stack_size -= size;
-            front_context.stack_size
+        let mut stack_size = {
+            let mut ret = 0;
+            for i in 0..=fn_index {
+                let ctx = self.fn_context_stack.get(i)
+                    .ok_or(CompilerError::Unknown)?;
+                ret += ctx.stack_size;
+            }
+            ret
         };
+
+        stack_size -= size;
         
         // Pop everything off the stack
         let popn_instr = Instruction::new(Opcode::POPN)
@@ -647,7 +778,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_var_decl_stmt(&mut self, stmt: Statement) -> CompilerResult<()> {
+    pub fn compile_var_decl_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
         let var_decl_args = match stmt {
             Statement::VariableDecl(args) => args,
             _ => return Err(CompilerError::Unknown)
@@ -675,7 +806,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_var_assign_stmt(&mut self, stmt: Statement) -> CompilerResult<()> {
+    pub fn compile_var_assign_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
         let (var_name, expr) = match stmt {
             Statement::Assignment(name, assign) => (name, assign),
             _ => return Err(CompilerError::Unknown)
@@ -714,6 +845,63 @@ impl Compiler {
 
         self.builder.push_instr(mov_instr);
 
+        Ok(())
+    }
+
+    pub fn compile_if_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        let (if_expr, stmt_list) = match stmt {
+            Statement::If(if_expr, stmt_list) => (if_expr, stmt_list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let tag = self.get_tag();
+        let expr_type = {
+            let checker = Checker::new(self);
+            checker.check_expr_type(if_expr)
+                .map_err(|_| CompilerError::TypeMismatch)?
+        };
+
+        if expr_type != Type::Bool {
+            return Err(CompilerError::IfOnlyAcceptsBooleanExpressions);
+        }
+
+        self.compile_expr(if_expr)?;
+
+        self.builder.tag(tag);
+
+        let jmpf_instr = Instruction::new(Opcode::JMPF)
+            .with_operand(&tag);
+        
+        self.builder.push_instr(jmpf_instr);
+        let mut weak_context = {
+            let front_context = self.fn_context_stack.get(0)
+                .ok_or(CompilerError::Unknown)?;
+            FunctionContext::new_weak(&front_context)
+        };
+
+        self.fn_context_stack.push_front(weak_context);
+        
+        for stmt in stmt_list.iter() {
+            self.compile_statement(stmt)?;
+        }
+
+        weak_context = self.fn_context_stack.pop_front()
+            .ok_or(CompilerError::Unknown)?;
+        
+        let popn_size = weak_context.stack_size as u64;
+
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand(&popn_size);
+        self.builder.push_instr(popn_instr);
+
+        let offset_end = self.builder.get_current_offset() as u64;
+
+        let instr = self.builder.get_tag(&tag)
+            .ok_or(CompilerError::Unknown)?;
+
+        instr.clear_operands();
+        instr.append_operand(&offset_end);
+        
         Ok(())
     }
 
@@ -763,6 +951,14 @@ impl Compiler {
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size += 8;
             },
+            Expression::BoolLiteral(b) => {
+                let pushb_instr = Instruction::new(Opcode::PUSHB)
+                    .with_operand(b);
+                self.builder.push_instr(pushb_instr);
+                let front_context = self.fn_context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size += 1;
+            },
             Expression::FloatLiteral(float) => {
                 return Err(CompilerError::NotImplemented);
             },
@@ -784,8 +980,8 @@ impl Compiler {
                 front_context.stack_size += 8;
             },
             Expression::Addition(lhs, rhs) => {
-                self.compile_expr(&lhs)?;
-                self.compile_expr(&rhs)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
                 let addi_instr = Instruction::new(Opcode::ADDI);
                 self.builder.push_instr(addi_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -794,8 +990,8 @@ impl Compiler {
                 front_context.stack_size += 8;
             },
             Expression::Subtraction(lhs, rhs) => {
-                self.compile_expr(&lhs)?;
-                self.compile_expr(&rhs)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
                 let subi_instr = Instruction::new(Opcode::SUBI);
                 self.builder.push_instr(subi_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -804,8 +1000,8 @@ impl Compiler {
                 front_context.stack_size += 8;
             },
             Expression::Multiplication(lhs, rhs) => {
-                self.compile_expr(&lhs)?;
-                self.compile_expr(&rhs)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
                 let muli_instr = Instruction::new(Opcode::MULI);
                 self.builder.push_instr(muli_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -814,14 +1010,127 @@ impl Compiler {
                 front_context.stack_size += 8;
             },
             Expression::Division(lhs, rhs) => {
-                self.compile_expr(&lhs)?;
-                self.compile_expr(&rhs)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
                 let divi_instr = Instruction::new(Opcode::DIVI);
                 self.builder.push_instr(divi_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size -= 16;
                 front_context.stack_size += 8;
+            },
+            Expression::Equals(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let eqi_instr = Instruction::new(Opcode::EQI);
+                        self.builder.push_instr(eqi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
+            },
+            Expression::NotEquals(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let eqi_instr = Instruction::new(Opcode::EQI);
+                        self.builder.push_instr(eqi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
+            },
+            Expression::Not(op) => {
+                self.compile_expr(op)?;
+                let not_instr = Instruction::new(Opcode::NOT);
+                self.builder.push_instr(not_instr);
+            },
+            Expression::GreaterThan(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let gti_instr = Instruction::new(Opcode::GTI);
+                        self.builder.push_instr(gti_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
+            },
+            Expression::GreaterThanEquals(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let gteqi_instr = Instruction::new(Opcode::GTEQI);
+                        self.builder.push_instr(gteqi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
+            },
+            Expression::LessThan(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let lti_instr = Instruction::new(Opcode::LTI);
+                        self.builder.push_instr(lti_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
+            },
+            Expression::LessThanEquals(lhs, rhs) => {
+                let checker = Checker::new(self);
+                let expr_type = checker.check_expr_type(lhs)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+                self.compile_expr(lhs)?;
+                self.compile_expr(rhs)?;
+                match expr_type {
+                    Type::Int => {
+                        let lteqi_instr = Instruction::new(Opcode::LTEQI);
+                        self.builder.push_instr(lteqi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    _ => return Err(CompilerError::NotImplemented)
+                };
             },
             _ => return Err(CompilerError::NotImplemented)
         };

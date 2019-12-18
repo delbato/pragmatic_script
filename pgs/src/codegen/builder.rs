@@ -19,7 +19,8 @@ use bincode::serialize;
 pub struct Builder {
     data: Vec<u8>,
     pub instructions: Vec<Instruction>,
-    labels: HashMap<String, usize>
+    labels: HashMap<String, usize>,
+    tags: HashMap<u64, usize>
 }
 
 impl Builder {
@@ -27,12 +28,22 @@ impl Builder {
         Builder {
             data: Vec::new(),
             instructions: Vec::new(),
-            labels: HashMap::new()
+            labels: HashMap::new(),
+            tags: HashMap::new()
         }
     }
 
     pub fn push_label(&mut self, label: String) {
         self.labels.insert(label, self.instructions.len());
+    }
+
+    pub fn tag(&mut self, tag: u64) {
+        self.tags.insert(tag, self.instructions.len());
+    }
+
+    pub fn get_tag(&mut self, tag: &u64) -> Option<&mut Instruction> {
+        let tag = self.tags.get(tag)?;
+        self.instructions.get_mut(*tag)
     }
 
     pub fn push_instr(&mut self, instruction: Instruction) {
@@ -67,5 +78,12 @@ impl Builder {
         }
 
         Some(code_before_size)
+    }
+    pub fn get_current_offset(&self) -> usize {
+        let mut offset = 0;
+        for instr in self.instructions.iter() {
+            offset += instr.get_size();
+        }
+        offset
     }
 }

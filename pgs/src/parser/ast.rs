@@ -79,7 +79,14 @@ pub enum Operator {
     Plus,
     Minus,
     Times,
-    Divide
+    Divide,
+    Equals,
+    NotEquals,
+    GreaterThan,
+    GreaterThanEquals,
+    LessThan,
+    LessThanEquals,
+    Not
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -91,7 +98,7 @@ pub struct FunctionDeclArgs {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct StructDeclArgs {
+pub struct ContainerDeclArgs {
     pub name: String,
     pub members: BTreeMap<usize, (String, Type)>
 }
@@ -100,7 +107,7 @@ pub struct StructDeclArgs {
 pub enum Declaration {
     Function(FunctionDeclArgs),
     Module(String, Vec<Declaration>),
-    Struct(StructDeclArgs),
+    Container(ContainerDeclArgs),
     Import(String, String)
 }
 
@@ -116,7 +123,12 @@ pub enum Statement {
     VariableDecl(VariableDeclArgs),
     Assignment(String, Box<Expression>),
     Call(String, Vec<Expression>),
-    Return(Box<Expression>)
+    Return(Box<Expression>),
+    Loop(Vec<Statement>),
+    While(Box<Expression>, Vec<Statement>),
+    If(Box<Expression>, Vec<Statement>),
+    IfElse(Box<Expression>, Vec<Statement>, Vec<Statement>),
+    IfElseIf(Box<Expression>, Vec<Statement>, Vec<(Box<Expression>, Vec<Statement>)>)
 }
 
 #[derive(PartialEq, Debug, Clone)]

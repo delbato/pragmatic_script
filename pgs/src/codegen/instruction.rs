@@ -11,8 +11,8 @@ use bincode::serialize;
 
 #[derive(Clone, Debug)]
 pub struct Instruction {
-    opcode: Opcode,
-    operands: Vec<u8>,
+    pub opcode: Opcode,
+    pub operands: Vec<u8>,
 }
 
 impl Instruction {

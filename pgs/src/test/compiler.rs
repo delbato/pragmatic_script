@@ -39,7 +39,7 @@ fn test_compile_addi() {
     compiler.push_empty_context();
 
     for stmt in stmt_list {
-        let cmp_res = compiler.compile_statement(stmt);
+        let cmp_res = compiler.compile_statement(&stmt);
         assert!(cmp_res.is_ok());
     }
 
@@ -83,7 +83,7 @@ fn test_compile_addi_assign() {
     compiler.push_empty_context();
 
     for stmt in stmt_list {
-        let cmp_res = compiler.compile_statement(stmt);
+        let cmp_res = compiler.compile_statement(&stmt);
         assert!(cmp_res.is_ok());
     }
 
@@ -134,7 +134,7 @@ fn test_compile_muli_assign() {
     compiler.push_empty_context();
 
     for stmt in stmt_list {
-        let cmp_res = compiler.compile_statement(stmt);
+        let cmp_res = compiler.compile_statement(&stmt);
         assert!(cmp_res.is_ok());
     }
 
@@ -207,7 +207,7 @@ fn test_compile_return() {
     compiler.push_new_context(context);
 
     for stmt in stmt_list {
-        let cmp_res = compiler.compile_statement(stmt);
+        let cmp_res = compiler.compile_statement(&stmt);
         assert!(cmp_res.is_ok());
     }
 
@@ -521,4 +521,81 @@ fn test_compile_expr_call_mod() {
 #[test]
 fn test_compile_stmt_call() {
 
+}
+
+use crate::parser::ast::Statement;
+
+#[test]
+fn test_compile_if() {
+    let code = String::from("
+        if true {
+            var:int x = 1;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let if_stmt_res = parser.parse_if(&mut lexer);
+    assert!(if_stmt_res.is_ok());
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let if_stmt = if_stmt_res.unwrap();
+
+    let cmp_res = compiler.compile_if_stmt(&if_stmt);
+
+    assert!(cmp_res.is_ok());
+
+    println!("Instructions:");
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+    }
+
+    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
+}
+
+use bincode::deserialize;
+
+#[test]
+fn test_compile_if_stmt_list() {
+    let code = String::from("
+        var:int x = 0;
+        if true {
+            x = 1;
+        }
+        var:int y = 4;
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let if_stmt_res = parser.parse_statement_list(&mut lexer);
+    assert!(if_stmt_res.is_ok());
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let if_stmt = if_stmt_res.unwrap();
+
+    for stmt in if_stmt {
+        let cmp_res = compiler.compile_statement(&stmt);
+        assert!(cmp_res.is_ok());
+    }
+
+    println!("Instructions:");
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+        if instr.opcode == Opcode::SMOVI {
+            let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
+            println!("Operand for SMOVI: {}", operand);
+        }
+    }
+
+    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }
