@@ -126,6 +126,8 @@ pub enum Statement {
     Return(Box<Expression>),
     Loop(Vec<Statement>),
     While(Box<Expression>, Vec<Statement>),
+    Break,
+    Continue,
     If(Box<Expression>, Vec<Statement>),
     IfElse(Box<Expression>, Vec<Statement>, Vec<Statement>),
     IfElseIf(Box<Expression>, Vec<Statement>, Vec<(Box<Expression>, Vec<Statement>)>)
@@ -137,7 +139,10 @@ pub enum Type {
     String,
     Float,
     Bool,
-    Other(String),
+    Auto,
+    Array(Box<Type>, usize),
+    AutoArray(Box<Type>),
+    Container(String),
     Tuple(Vec<Type>),
     Reference(Box<Type>)
 }

@@ -625,3 +625,53 @@ fn test_compile_if_neg() {
 
     assert!(cmp_res.is_err());
 }
+
+#[test]
+fn test_compile_while_stmt_list() {
+    let code = String::from("
+        var:int x = 0;
+        while true {
+            x = x + 1;
+            if x > 10 {
+                break;
+            }
+        }
+        var:int y = 4;
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let while_stmt_res = parser.parse_statement_list(&mut lexer);
+    assert!(while_stmt_res.is_ok());
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let while_stmt = while_stmt_res.unwrap();
+
+    for stmt in while_stmt {
+        let cmp_res = compiler.compile_statement(&stmt);
+        assert!(cmp_res.is_ok());
+    }
+
+    println!("Instructions:");
+    let mut size = 0;
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        print!("Code pos: {}; ", size);
+        println!("{:?}", instr);
+        if instr.opcode == Opcode::SMOVI {
+            let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
+            println!("Operand for SMOVI: {}", operand);
+        }
+        if instr.opcode == Opcode::SDUPI {
+            let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
+            println!("Operand for SDUPI: {}", operand);
+        }
+        size += instr.get_size();
+    }
+
+    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
+}

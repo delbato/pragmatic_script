@@ -112,13 +112,29 @@ impl ModuleContext {
 }
 
 #[derive(Clone)]
-pub struct LoopContext {
-    pub instr_offset: usize,
-    pub instr_end: usize
+pub enum LoopType {
+    Loop,
+    For,
+    While
 }
 
 #[derive(Clone)]
-pub struct IfContext {
-    pub instr_offset: usize,
-    pub instr_end: usize
+pub struct LoopContext {
+    pub instr_start: usize,
+    pub loop_type: LoopType,
+    pub break_instr_tags: Vec<u64>
+}
+
+impl LoopContext {
+    pub fn new(instr_start: usize, loop_type: LoopType) -> LoopContext {
+        LoopContext {
+            instr_start: instr_start,
+            loop_type: loop_type,
+            break_instr_tags: Vec::new()
+        }
+    }
+
+    pub fn add_break_tag(&mut self, tag: u64) {
+        self.break_instr_tags.push(tag);
+    }
 }

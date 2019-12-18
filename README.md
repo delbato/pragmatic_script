@@ -37,17 +37,10 @@ Some of my goals with this are:
 * [ ] Supports string handling
 * [x] Supports simple conditionals (if without else)
 * [ ] Supports complex conditionals (if/elseif/else, switch/case...)
-* [ ] Supports loops (loop, while, for etc...)
+* [ ] PARTIAL: Supports loops (loop, while, for etc...) (see FN#4)
 * [ ] PARTIAL: Supports custom types (Containers) (see FN#3)
 * [ ] Supports calling rust functions
 * [ ] Supports embedding/exposing rust native types
-
-## Footnotes
-
-1. The interpreter already handles function calls correctly, but  
-    the compiler doesnt fully support call compilation yet (see unit tests)
-2. Float arithmetics are "disabled" right now - making them work would be trivial
-3. Currently implementing.
 
 ## Design
 
@@ -73,3 +66,11 @@ fn: main() {
     return add_fn(lhs, rhs);
 }
 ```
+
+## Footnotes
+
+1. The interpreter already handles function calls correctly, but  
+    the compiler doesnt fully support call compilation yet (see unit tests)
+2. Float arithmetics are "disabled" right now - making them work would be trivial
+3. Currently implementing.
+4. Currently implementing - "while" and "loop" seem to compile fine, but havent been tested to run

@@ -67,6 +67,12 @@ pub enum Token {
     #[token = "else"]
     Else,
 
+    #[token = "break"]
+    Break,
+
+    #[token = "continue"]
+    Continue,
+
     #[regex = "([a-zA-Z_][a-zA-Z0-9_]*)"]
     Text,
 

@@ -14,7 +14,9 @@ use super::{
     instruction::Instruction,
     context::{
         FunctionContext,
-        ModuleContext
+        ModuleContext,
+        LoopContext,
+        LoopType
     },
     program::Program,
     container::{
@@ -42,6 +44,7 @@ pub struct Compiler {
     global_context: FunctionContext,
     mod_context_stack: VecDeque<ModuleContext>,
     fn_context_stack: VecDeque<FunctionContext>,
+    loop_context_stack: VecDeque<LoopContext>,
     pub builder: Builder,
     function_uid_map: HashMap<String, u64>,
     function_uid_set: HashSet<u64>,
@@ -65,7 +68,10 @@ pub enum CompilerError {
     DuplicateModule,
     DuplicateStruct,
     InvalidArgumentCount,
-    IfOnlyAcceptsBooleanExpressions
+    IfOnlyAcceptsBooleanExpressions,
+    WhileOnlyAcceptsBooleanExpressions,
+    ExpectedBreak,
+    ExpectedContinue
 }
 
 impl Compiler {
@@ -74,6 +80,7 @@ impl Compiler {
             mod_context_stack: VecDeque::new(),
             global_context: FunctionContext::new(),
             fn_context_stack: VecDeque::new(),
+            loop_context_stack: VecDeque::new(),
             builder: Builder::new(),
             function_uid_map: HashMap::new(),
             function_uid_set: HashSet::new(),
@@ -95,6 +102,25 @@ impl Compiler {
         let mut context = FunctionContext::new();
         context.stack_size = stack_size;
         self.fn_context_stack.push_front(context);
+    }
+
+    pub fn push_loop_context(&mut self, ctx: LoopContext) {
+        self.loop_context_stack.push_front(ctx);
+    }
+
+    pub fn pop_loop_context(&mut self) -> CompilerResult<LoopContext> {
+        self.loop_context_stack.pop_front()
+            .ok_or(CompilerError::Unknown)
+    }
+
+    pub fn get_current_loop_context(&self) -> CompilerResult<&LoopContext> {
+        self.loop_context_stack.get(0)
+            .ok_or(CompilerError::Unknown)
+    }
+
+    pub fn get_current_loop_context_mut(&mut self) -> CompilerResult<&mut LoopContext> {
+        self.loop_context_stack.get_mut(0)
+            .ok_or(CompilerError::Unknown)
     }
 
     pub fn resolve_cont(&self, name: &String) -> CompilerResult<Container> {
@@ -147,7 +173,7 @@ impl Compiler {
             }
             // Otherwise, the function is unknown.
             else {
-                return Err(CompilerError::UnknownFunction);
+                return Err(CompilerError::UnknownContainer);
             }
         }
     }
@@ -163,7 +189,7 @@ impl Compiler {
     /// name does not resolve to a function.
     /// 
     /// ### Params
-    /// * `name`:   canonical name of the function
+    /// * `name`: name of the function
     /// ### Returns
     /// A Result containing the function data, errors otherwise
     pub fn resolve_fn(&self, name: &String) -> CompilerResult<(u64, Type, BTreeMap<usize, (String, Type)>)> {
@@ -646,11 +672,228 @@ impl Compiler {
             Statement::If(_, _) => {
                 self.compile_if_stmt(stmt)?;  
             },
+            Statement::While(_, _ ) => {
+                self.compile_while_stmt(stmt)?;  
+            },
+            Statement::Break => self.compile_break_stmt(stmt)?,
+            Statement::Continue => self.compile_continue_stmt(stmt)?,
             _ => {
                 return Err(CompilerError::NotImplemented);
             }
         };
 
+        Ok(())
+    }
+
+    pub fn compile_while_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        let (while_expr, stmt_list) = match stmt {
+            Statement::While(expr, list) => (expr, list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let instr_start = self.builder.get_current_offset();
+        let tag_end = self.get_tag();
+
+        let mut loop_context = LoopContext::new(instr_start, LoopType::While);
+        self.push_loop_context(loop_context);
+
+        let expr_type = {
+            let checker = Checker::new(self);
+            checker.check_expr_type(while_expr)
+                .map_err(|_| CompilerError::TypeMismatch)?
+        };
+
+        if expr_type != Type::Bool {
+            return Err(CompilerError::WhileOnlyAcceptsBooleanExpressions);
+        }
+
+        self.compile_expr(while_expr)?;
+        self.builder.tag(tag_end);
+
+        let jmpf_instr = Instruction::new(Opcode::JMPF)
+            .with_operand(&tag_end);
+        
+        self.builder.push_instr(jmpf_instr);
+        {
+            let front_context = self.fn_context_stack.get_mut(0)
+                .ok_or(CompilerError::Unknown)?;
+            front_context.stack_size -= 1;
+        }
+
+
+        let mut weak_context = {
+            let front_context = self.fn_context_stack.get(0)
+                .ok_or(CompilerError::Unknown)?;
+            FunctionContext::new_weak(&front_context)
+        };
+        
+        self.fn_context_stack.push_front(weak_context);
+
+        for stmt in stmt_list.iter() {
+            self.compile_statement(stmt)?;
+        }
+
+        weak_context = self.fn_context_stack.pop_front()
+            .ok_or(CompilerError::Unknown)?;
+        
+        let popn_size = weak_context.stack_size as u64;
+
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand(&popn_size);
+
+        let jmp_instr = Instruction::new(Opcode::JMP)
+            .with_operand(&instr_start);
+        
+        self.builder.push_instr(popn_instr);
+        self.builder.push_instr(jmp_instr);
+
+        let instr_end = self.builder.get_current_offset();
+
+        {
+            let jmpf_instr = self.builder.get_tag(&tag_end)
+                .ok_or(CompilerError::Unknown)?;
+            jmpf_instr.clear_operands();
+            jmpf_instr.append_operand(&instr_end);
+        }
+
+        loop_context = self.pop_loop_context()?;
+
+        for tag in loop_context.break_instr_tags {
+            let jmp_instr = self.builder.get_tag(&tag)
+                .ok_or(CompilerError::Unknown)?;
+            jmp_instr.clear_operands();
+            jmp_instr.append_operand(&instr_end);
+        }
+        
+        Ok(())
+    }
+    
+    pub fn compile_break_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        if *stmt != Statement::Break {
+            return Err(CompilerError::ExpectedBreak);
+        }
+
+        let popn_size = {
+            let front_fn_ctx = self.fn_context_stack.get(0)
+                .ok_or(CompilerError::UnknownFunction)?;
+            front_fn_ctx.stack_size as u64
+        };
+
+        let mut front_loop_ctx = self.pop_loop_context()?;
+
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand(&popn_size);
+
+        self.builder.push_instr(popn_instr);
+
+        let break_tag = self.get_tag();
+
+        front_loop_ctx.add_break_tag(break_tag);
+
+        self.builder.tag(break_tag);
+
+        let jmp_instr = Instruction::new(Opcode::JMP)
+            .with_operand(&break_tag);
+        
+        self.builder.push_instr(jmp_instr);
+
+        self.push_loop_context(front_loop_ctx);
+
+        Ok(())
+    }
+
+    pub fn compile_continue_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        if *stmt != Statement::Continue {
+            return Err(CompilerError::ExpectedContinue);
+        }
+
+        let popn_size = {
+            let front_fn_ctx = self.fn_context_stack.get(0)
+                .ok_or(CompilerError::UnknownFunction)?;
+            front_fn_ctx.stack_size as u64
+        };
+
+        let front_loop_ctx = self.pop_loop_context()?;
+
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand(&popn_size);
+
+        self.builder.push_instr(popn_instr);
+
+        let jmp_instr = Instruction::new(Opcode::JMP)
+            .with_operand(&front_loop_ctx.instr_start);
+        
+        self.builder.push_instr(jmp_instr);
+
+        self.push_loop_context(front_loop_ctx);
+
+        Ok(())
+    }
+
+    pub fn compile_loop_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        Err(CompilerError::NotImplemented)
+    }
+
+    pub fn compile_if_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        let (if_expr, stmt_list) = match stmt {
+            Statement::If(if_expr, stmt_list) => (if_expr, stmt_list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let tag = self.get_tag();
+        let expr_type = {
+            let checker = Checker::new(self);
+            checker.check_expr_type(if_expr)
+                .map_err(|_| CompilerError::TypeMismatch)?
+        };
+
+        if expr_type != Type::Bool {
+            return Err(CompilerError::IfOnlyAcceptsBooleanExpressions);
+        }
+
+        self.compile_expr(if_expr)?;
+
+        self.builder.tag(tag);
+
+        let jmpf_instr = Instruction::new(Opcode::JMPF)
+            .with_operand(&tag);
+        
+        self.builder.push_instr(jmpf_instr);
+        {
+            let front_context = self.fn_context_stack.get_mut(0)
+                .ok_or(CompilerError::Unknown)?;
+            front_context.stack_size -= 1;
+        }
+
+        let mut weak_context = {
+            let front_context = self.fn_context_stack.get(0)
+                .ok_or(CompilerError::Unknown)?;
+            FunctionContext::new_weak(&front_context)
+        };
+
+        self.fn_context_stack.push_front(weak_context);
+        
+        for stmt in stmt_list.iter() {
+            self.compile_statement(stmt)?;
+        }
+
+        weak_context = self.fn_context_stack.pop_front()
+            .ok_or(CompilerError::Unknown)?;
+        
+        let popn_size = weak_context.stack_size as u64;
+
+        let popn_instr = Instruction::new(Opcode::POPN)
+            .with_operand(&popn_size);
+        self.builder.push_instr(popn_instr);
+
+        let offset_end = self.builder.get_current_offset() as u64;
+
+        let instr = self.builder.get_tag(&tag)
+            .ok_or(CompilerError::Unknown)?;
+
+        instr.clear_operands();
+        instr.append_operand(&offset_end);
+        
         Ok(())
     }
 
@@ -845,63 +1088,6 @@ impl Compiler {
 
         self.builder.push_instr(mov_instr);
 
-        Ok(())
-    }
-
-    pub fn compile_if_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
-        let (if_expr, stmt_list) = match stmt {
-            Statement::If(if_expr, stmt_list) => (if_expr, stmt_list),
-            _ => return Err(CompilerError::Unknown)
-        };
-
-        let tag = self.get_tag();
-        let expr_type = {
-            let checker = Checker::new(self);
-            checker.check_expr_type(if_expr)
-                .map_err(|_| CompilerError::TypeMismatch)?
-        };
-
-        if expr_type != Type::Bool {
-            return Err(CompilerError::IfOnlyAcceptsBooleanExpressions);
-        }
-
-        self.compile_expr(if_expr)?;
-
-        self.builder.tag(tag);
-
-        let jmpf_instr = Instruction::new(Opcode::JMPF)
-            .with_operand(&tag);
-        
-        self.builder.push_instr(jmpf_instr);
-        let mut weak_context = {
-            let front_context = self.fn_context_stack.get(0)
-                .ok_or(CompilerError::Unknown)?;
-            FunctionContext::new_weak(&front_context)
-        };
-
-        self.fn_context_stack.push_front(weak_context);
-        
-        for stmt in stmt_list.iter() {
-            self.compile_statement(stmt)?;
-        }
-
-        weak_context = self.fn_context_stack.pop_front()
-            .ok_or(CompilerError::Unknown)?;
-        
-        let popn_size = weak_context.stack_size as u64;
-
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand(&popn_size);
-        self.builder.push_instr(popn_instr);
-
-        let offset_end = self.builder.get_current_offset() as u64;
-
-        let instr = self.builder.get_tag(&tag)
-            .ok_or(CompilerError::Unknown)?;
-
-        instr.clear_operands();
-        instr.append_operand(&offset_end);
-        
         Ok(())
     }
 

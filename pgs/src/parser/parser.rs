@@ -38,11 +38,13 @@ pub enum ParseError {
     UnknownType,
     ExpectedArgType,
     ExpectedArgName,
+    ExpectedLoop,
     DuplicateArg,
     ExpectedBlockOrSemicolon,
     ExpectedCloseBlock,
     UnknownStatement,
     ExpectedVarName,
+    ExpectedWhile,
     ExpectedAssignment,
     ExpectedSemicolon,
     UnsupportedExpression,
@@ -522,7 +524,7 @@ impl Parser {
             Token::Bool => Type::Bool,
             Token::Text => {
                 let type_name = String::from(lexer.slice());
-                Type::Other(type_name)
+                Type::Container(type_name)
             },
             _ => return Err(ParseError::ExpectedMemberType)
         };
@@ -543,11 +545,68 @@ impl Parser {
     }
 
     pub fn parse_loop(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
-        Err(ParseError::Unimplemented)
+        if lexer.token != Token::Loop {
+            return Err(ParseError::ExpectedLoop);
+        }
+
+        // Swallow "loop"
+        lexer.advance();
+
+        if lexer.token != Token::OpenBlock {
+            return Err(ParseError::ExpectedOpenBlock);
+        }
+
+        // Swallow "{"
+        lexer.advance();
+
+        let stmt_list = self.parse_statement_list(lexer)?;
+
+        if lexer.token != Token::CloseBlock {
+            return Err(ParseError::ExpectedCloseBlock);
+        }
+
+        // Swallow "}"
+        lexer.advance();
+
+        Ok(
+            Statement::Loop(stmt_list)
+        )
     }
 
     pub fn parse_while(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
-        Err(ParseError::Unimplemented)
+        if lexer.token != Token::While {
+            return Err(ParseError::ExpectedWhile);
+        }
+
+        // Swallow "while"
+        lexer.advance();
+
+        let while_expr = self.parse_expr(lexer, &[
+            Token::OpenBlock,
+            Token::Semicolon
+        ])?;
+
+        if lexer.token == Token::Semicolon {
+            return Ok(
+                Statement::While(Box::new(while_expr), Vec::new())
+            );
+        }
+
+        if lexer.token != Token::OpenBlock {
+            return Err(ParseError::ExpectedOpenBlock);
+        }
+
+        // Swallow "{"
+        lexer.advance();
+
+        let stmt_list = self.parse_statement_list(lexer)?;
+
+        // Swallow "}"
+        lexer.advance();
+
+        Ok(
+            Statement::While(Box::new(while_expr), stmt_list)
+        )
     }
 
     pub fn parse_if(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
@@ -598,6 +657,18 @@ impl Parser {
                 Token::If => {
                     ret.push(self.parse_if(lexer)?);
                 },
+                Token::Continue => {
+                    ret.push(self.parse_continue(lexer)?);
+                },
+                Token::Break => {
+                    ret.push(self.parse_break(lexer)?);
+                },
+                Token::While => {
+                    ret.push(self.parse_while(lexer)?);
+                },
+                Token::Loop => {
+                    ret.push(self.parse_loop(lexer)?);
+                },
                 _ => {
                     return Err(ParseError::UnknownStatement);
                 }
@@ -606,6 +677,46 @@ impl Parser {
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_break(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        if lexer.token != Token::Break {
+            return Err(ParseError::UnknownStatement);
+        }
+
+        // Swallow "break"
+        lexer.advance();
+
+        if lexer.token != Token::Semicolon {
+            return Err(ParseError::ExpectedSemicolon);
+        }
+
+        // Swallow ";"
+        lexer.advance();
+
+        Ok(
+            Statement::Break
+        )
+    }
+
+    pub fn parse_continue(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        if lexer.token != Token::Continue {
+            return Err(ParseError::UnknownStatement);
+        }
+
+        // Swallow "continue"
+        lexer.advance();
+
+        if lexer.token != Token::Semicolon {
+            return Err(ParseError::ExpectedSemicolon);
+        }
+
+        // Swallow ";"
+        lexer.advance();
+
+        Ok(
+            Statement::Continue
+        )
     }
 
     pub fn parse_return(&self, lexer: &mut Lexer) -> ParseResult<Statement> {

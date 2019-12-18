@@ -383,3 +383,40 @@ fn test_parse_if() {
         println!("if expr: {:?}", *expr_box);
     }
 }
+
+#[test]
+fn test_parse_while() {
+    let code = String::from("
+        while true {
+            var:int x = 0;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_while(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    if let Statement::While(expr_box, stmt_list) = stmt_res.unwrap() {
+        println!("while expr: {:?}", *expr_box);
+        println!("while stmt list: {:?}", stmt_list);
+    }
+}
+
+#[test]
+fn test_parse_loop() {
+    let code = String::from("
+        loop {
+            var:int x = 0;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_loop(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    if let Statement::Loop(stmt_list) = stmt_res.unwrap() {
+        println!("loop stmt list: {:?}", stmt_list);
+    }
+}
