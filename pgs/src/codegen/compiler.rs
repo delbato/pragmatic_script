@@ -4,6 +4,16 @@ use crate::{
     },
     vm::{
         is::Opcode
+    },
+    api::{
+        function::{
+            FunctionResult,
+            FunctionError,
+            Function
+        },
+        module::{
+            Module
+        }
     }
 };
 use super::{
@@ -48,6 +58,7 @@ pub struct Compiler {
     pub builder: Builder,
     function_uid_map: HashMap<String, u64>,
     function_uid_set: HashSet<u64>,
+    foreign_function_set: HashSet<u64>,
     loop_uid_set: HashSet<u64>,
     tag_set: HashSet<u64>
 }
@@ -84,10 +95,72 @@ impl Compiler {
             builder: Builder::new(),
             function_uid_map: HashMap::new(),
             function_uid_set: HashSet::new(),
+            foreign_function_set: HashSet::new(),
             loop_uid_set: HashSet::new(),
             tag_set: HashSet::new()
         };
         comp
+    }
+
+    pub fn register_foreign_module(&mut self, module: &mut Module, parent_path: String) -> CompilerResult<()> {
+        let mod_name = module.name.clone();
+        let mut path;
+        if parent_path.len() > 0 {
+            path = parent_path + "::" + &mod_name;
+        } else {
+            let curr_mod_name = {
+                let mod_front_ctx = self.mod_context_stack.get(0)
+                    .ok_or(CompilerError::Unknown)?;
+                mod_front_ctx.name.clone()
+            };
+
+            path = curr_mod_name + "::" + &mod_name;
+        }
+
+        let mut mod_context = ModuleContext::new(mod_name);
+
+        for function in module.functions.iter_mut() {
+            let mut full_fn_name = path.clone();
+            full_fn_name += "::";
+            full_fn_name += &function.name; 
+            
+            let function_name = function.name.clone();
+            let function_uid = self.get_function_uid(&full_fn_name);
+            let fn_return_type = function.return_type
+                .as_ref()
+                .cloned()
+                .ok_or(CompilerError::Unknown)?;
+
+            let mut arg_bmap = BTreeMap::new();
+            for i in 0..function.arguments.len() {
+                let arg_type = function.arguments.get(i)
+                    .cloned()
+                    .ok_or(CompilerError::Unknown)?;
+                arg_bmap.insert(i, (String::new(), arg_type));
+            }
+            let fn_tuple = (function_uid, fn_return_type, arg_bmap);
+            mod_context.functions.insert(function_name, fn_tuple);
+            self.foreign_function_set.insert(function_uid.clone());
+            function.uid = Some(function_uid);
+        }
+
+        self.mod_context_stack.push_front(mod_context);
+
+        for (_, module) in module.modules.iter_mut() {
+            self.register_foreign_module(module, path.clone())?;
+        }
+
+        mod_context = self.mod_context_stack.pop_front()
+            .ok_or(CompilerError::Unknown)?;
+
+        let front_mod_ctx = self.mod_context_stack.get_mut(0)
+            .ok_or(CompilerError::UnknownModule)?;
+
+        println!("Registering module {} in module {}", mod_context.name, front_mod_ctx.name);
+
+        front_mod_ctx.modules.insert(mod_context.name.clone(), mod_context);
+
+        Ok(())
     }
 
     pub fn push_context(&mut self) {
@@ -398,6 +471,9 @@ impl Compiler {
         let mut functions = HashMap::new();
 
         for (fn_name, fn_uid) in self.function_uid_map.iter() {
+            if self.foreign_function_set.contains(fn_uid) {
+                continue;
+            }
             let fn_offset = builder.get_label_offset(fn_name)
                 .ok_or(CompilerError::UnknownFunction)?;
             functions.insert(*fn_uid, fn_offset);
@@ -719,7 +795,6 @@ impl Compiler {
                 .ok_or(CompilerError::Unknown)?;
             front_context.stack_size -= 1;
         }
-
 
         let mut weak_context = {
             let front_context = self.fn_context_stack.get(0)

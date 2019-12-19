@@ -19,7 +19,7 @@ fn test_engine_run() {
             return lhs + rhs;
         }
         fn: main(argc: int) ~ int {
-            var:int y = 0;
+            var y: int = 0;
             y = argc * 10;
             return y;
         }
@@ -47,7 +47,7 @@ fn test_engine_call() {
             return 10;
         }
         fn: main(argc: int) ~ int {
-            var:int y = 0;
+            var y: int = 0;
             y = argc * ten();
             return y;
         }
@@ -82,7 +82,7 @@ fn test_engine_mod_call() {
         import other::ten = TEN;
 
         fn: main(argc: int) ~ int {
-            var:int y = 0;
+            var y: int = 0;
             y = argc * TEN();
             return y;
         }
@@ -103,4 +103,83 @@ fn test_engine_mod_call() {
     assert!(pop_res.is_ok());
 
     assert_eq!(pop_res.unwrap(), 50);
+}
+
+#[test]
+fn test_engine_while() {
+    let code = "
+        fn: main() ~ int {
+            var i: int = 0;
+
+            while i < 10 {
+                i = i + 1;
+            }
+
+            return i;
+        }
+    ";
+
+    let mut engine = Engine::new(64);
+
+    let load_res = engine.load_code(code);
+    assert!(load_res.is_ok());
+
+    let run_res = engine.run_fn(&String::from("root::main"));
+    assert!(run_res.is_ok());
+
+    let pop_res = engine.pop_stack();
+    assert!(pop_res.is_ok());
+
+    let ret: i64 = pop_res.unwrap();
+
+    assert_eq!(ret, 9);
+}
+
+use crate::{
+    api::function::*,
+    api::module::*,
+    vm::core::{
+        Core,
+        CoreError
+    },
+    parser::ast::Type
+};
+
+#[test]
+fn test_engine_foreign_function() {
+    let mut engine = Engine::new(128);
+
+    let function = Function::new(String::from("geti"), Vec::new())
+        .with_return_type(Type::Int)
+        .with_callback(
+            Box::new(move |core: &mut Core| {
+                core.push_stack::<i64>(-127)
+                    .map_err(|_| FunctionError::Unknown)
+            })
+        );
+    
+    let module = Module::new(String::from("ext"))
+        .with_function(function);
+    
+    let reg_res = engine.register_module(module);
+    assert!(reg_res.is_ok());
+
+    let code = "
+        import ext::geti;
+
+        fn: main() ~ int {
+            return geti();
+        }
+    ";
+
+    let load_res = engine.load_code(code);
+    assert!(load_res.is_ok());
+
+    let run_res = engine.run_fn(&String::from("root::main"));
+    assert!(run_res.is_ok());
+
+    let pop_res = engine.pop_stack::<i64>();
+    assert!(pop_res.is_ok());
+
+    assert_eq!(pop_res.unwrap(), -127);
 }

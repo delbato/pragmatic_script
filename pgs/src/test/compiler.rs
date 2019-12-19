@@ -23,8 +23,8 @@ use logos::Logos;
 #[test]
 fn test_compile_addi() {
     let code = String::from("
-        var:int x = 4;
-        var:int y = x + 4;
+        var x: int = 4;
+        var y: int = x + 4;
     ");
 
     let mut lexer = Token::lexer(code.as_str());
@@ -67,7 +67,7 @@ fn test_compile_addi() {
 #[test]
 fn test_compile_addi_assign() {
     let code = String::from("
-        var:int x = 4;
+        var x: int = 4;
         x = x + 4;
     ");
 
@@ -114,11 +114,11 @@ fn test_compile_addi_assign() {
 #[test]
 fn test_compile_muli_assign() {
     let code = String::from("
-        var:int x = 4;
+        var x: int = 4;
         x = x + 4;
-        var:int z = x * 2;
+        var z: int = x * 2;
         x = z;
-        var:int w = 4;
+        var w: int = 4;
         x = w;
     ");
 
@@ -188,8 +188,8 @@ fn test_compile_muli_assign() {
 #[test]
 fn test_compile_return() {
     let code = String::from("
-        var:int x = 4;
-        var:int y = x + 4;
+        var x: int = 4;
+        var y: int= x + 4;
         return y - 4;
     ");
 
@@ -256,8 +256,8 @@ fn test_compile_return() {
 pub fn test_compile_fn_decl() {
     let code = String::from("
         fn: main(arg: int) ~ int {
-            var:int x = arg * 4;
-            var:int y = x + 4;
+            var x: int = arg * 4;
+            var y: int = x + 4;
 
             return y - 4;
         }
@@ -338,7 +338,7 @@ fn test_compile_expr_call() {
             return 5;
         }
         fn: main() ~ int {
-            var:int x = five();
+            var x: int = five();
             return x;
         }
     ");
@@ -433,7 +433,7 @@ fn test_compile_expr_call_mod() {
         }
         import other::five;
         fn: main() ~ int {
-            var:int x = five();
+            var x: int = five();
             return x;
         }
     ");
@@ -529,7 +529,7 @@ use crate::parser::ast::Statement;
 fn test_compile_if() {
     let code = String::from("
         if true {
-            var:int x = 1;
+            var x: int = 1;
         }
     ");
 
@@ -563,11 +563,11 @@ use bincode::deserialize;
 #[test]
 fn test_compile_if_stmt_list() {
     let code = String::from("
-        var:int x = 0;
+        var x: int = 0;
         if true {
             x = 1;
         }
-        var:int y = 4;
+        var y: int = 4;
     ");
 
     let parser = Parser::new(code.clone());
@@ -604,7 +604,7 @@ fn test_compile_if_stmt_list() {
 fn test_compile_if_neg() {
     let code = String::from("
         if 1 + 1 {
-            var:int x = 1;
+            var x: int = 1;
         }
     ");
 
@@ -629,14 +629,14 @@ fn test_compile_if_neg() {
 #[test]
 fn test_compile_while_stmt_list() {
     let code = String::from("
-        var:int x = 0;
+        var x: int = 0;
         while true {
             x = x + 1;
             if x > 10 {
                 break;
             }
         }
-        var:int y = 4;
+        var y: int = 4;
     ");
 
     let parser = Parser::new(code.clone());

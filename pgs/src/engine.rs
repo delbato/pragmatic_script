@@ -12,6 +12,9 @@ use crate::{
     codegen::{
         compiler::Compiler
     },
+    api::{
+        module::Module
+    }
 };
 
 use std::{
@@ -63,7 +66,7 @@ impl Engine {
     }
 
     pub fn load_code(&mut self, code: &str) -> EngineResult<()> {
-        let mut parser = Parser::new(String::from(code));
+        let parser = Parser::new(String::from(code));
         let decl_list = parser.parse_root_decl_list()
             .map_err(|_| EngineError::ParseError)?;
         self.compiler.compile_root_decl_list(decl_list)
@@ -102,6 +105,13 @@ impl Engine {
     pub fn run_fn(&mut self, name: &String) -> EngineResult<()> {
         let fn_uid = self.compiler.get_function_uid(name);
         self.core.run_fn(fn_uid)
+            .map_err(|_| EngineError::CoreError)
+    }
+
+    pub fn register_module(&mut self, mut module: Module) -> EngineResult<()> {
+        self.compiler.register_foreign_module(&mut module, String::new())
+            .map_err(|_| EngineError::CompileError)?;
+        self.core.register_foreign_module(module)
             .map_err(|_| EngineError::CoreError)
     }
 }

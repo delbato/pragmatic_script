@@ -125,8 +125,8 @@ fn test_parse_decl_list() {
 #[test]
 fn test_parse_stmt_list() {
     let code = String::from("
-        var:int x = 4;
-        var:int y = 6;
+        var x: int = 4;
+        var y: int = 6;
     ");
 
     let mut lexer = Token::lexer(code.as_str());
@@ -142,7 +142,7 @@ fn test_parse_stmt_list() {
 #[test]
 fn test_parse_stmt_addition() {
     let code = String::from("
-        var:int x = 4;
+        var x: int = 4;
         y = 1 + 2 * 3 + x;
     ");
 
@@ -189,8 +189,8 @@ fn test_parse_raw_var_expr() {
 fn test_parse_full_fn() {
     let code = String::from("
         fn: main(argc: int) ~ int {
-            var:int x = 4;
-            var:int y = 6;
+            var x: int = 4;
+            var y: int = 6;
             return x + y;
         }
     ");
@@ -355,8 +355,8 @@ fn test_parse_mod_decl() {
         }
 
         fn: main() ~ int {
-            var:int five = somemodule::nestedmodule::five();
-            var:int fifty = othermodule::multiply(five, 10);
+            var five: int = somemodule::nestedmodule::five();
+            var fifty: int = othermodule::multiply(five, 10);
             return fifty;
         }
     ");
@@ -370,7 +370,7 @@ fn test_parse_mod_decl() {
 fn test_parse_if() {
     let code = String::from("
         if true {
-            var:int x = 0;
+            var x: int = 0;
         }
     ");
 
@@ -388,7 +388,7 @@ fn test_parse_if() {
 fn test_parse_while() {
     let code = String::from("
         while true {
-            var:int x = 0;
+            var x: int = 0;
         }
     ");
 
@@ -407,7 +407,7 @@ fn test_parse_while() {
 fn test_parse_loop() {
     let code = String::from("
         loop {
-            var:int x = 0;
+            var x: int = 0;
         }
     ");
 

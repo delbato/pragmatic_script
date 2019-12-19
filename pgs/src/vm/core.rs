@@ -6,6 +6,10 @@ use super::{
 use crate::{
     codegen::{
         program::Program
+    },
+    api::{
+        module::Module,
+        function::*
     }
 };
 
@@ -52,6 +56,7 @@ pub struct Core {
     stack: Vec<u8>,
     heap: Vec<u8>,
     heap_pointers: Vec<Range<usize>>,
+    foreign_functions: HashMap<u64, Box<dyn FnMut(&mut Core) -> FunctionResult<()>>>,
     swap: Vec<u8>,
     program: Option<Program>,
     stack_frames: VecDeque<usize>,
@@ -84,6 +89,7 @@ impl Core {
             stack: stack,
             heap: Vec::new(),
             heap_pointers: Vec::new(),
+            foreign_functions: HashMap::new(),
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
             ip: 0,
@@ -119,7 +125,8 @@ impl Core {
     pub fn run(&mut self) -> CoreResult<()> {
         self.run_at(0)
     }
-
+    
+    #[inline]
     pub fn run_fn(&mut self, uid: u64) -> CoreResult<()> {
         let fn_offset = {
             let program = self.program.as_ref()
@@ -152,6 +159,10 @@ impl Core {
                 },
                 Opcode::PUSHI => {
                     let op: i64 = self.get_op()?;
+                    self.push_stack(op)?;
+                },
+                Opcode::PUSHB => {
+                    let op: bool = self.get_op()?;
                     self.push_stack(op)?;
                 },
                 Opcode::POPI => {
@@ -210,6 +221,27 @@ impl Core {
                     println!("Swapping in int {}", op);
                     self.push_stack(op)?;
                 },
+                Opcode::JMP => {
+                    let op: u64 = self.get_op()?;
+                    self.ip = op as usize;
+                },
+                Opcode::JMPF => {
+                    let op: u64 = self.get_op()?;
+                    let jump: bool = self.pop_stack()?;
+                    if !jump {
+                        self.ip = op as usize;
+                    }
+                },
+                Opcode::EQI => {
+                    let rhs: i64 = self.pop_stack()?;
+                    let lhs: i64 = self.pop_stack()?;
+                    self.push_stack(lhs == rhs)?;
+                },
+                Opcode::LTI => {
+                    let rhs: i64 = self.pop_stack()?;
+                    let lhs: i64 = self.pop_stack()?;
+                    self.push_stack(lhs < rhs)?;
+                },
                 _ => {
                     return Err(CoreError::UnimplementedOpcode(opcode));
                 }
@@ -221,7 +253,13 @@ impl Core {
     #[inline]
     fn call(&mut self) -> CoreResult<()> {
         let fn_uid: u64 = self.get_op()?;
-        self.call_stack.push_front(self.ip);
+        if let Some(mut closure) = self.foreign_functions.remove(&fn_uid) {
+            println!("Executing foreign function...");
+            closure(self)
+                .map_err(|_| CoreError::Unknown)?;
+            self.foreign_functions.insert(fn_uid, closure);
+            return Ok(());
+        }
 
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
@@ -432,6 +470,20 @@ impl Core {
             self.swap[i] = raw_bytes[i];
         }
 
+        Ok(())
+    }
+
+    pub fn register_foreign_module(&mut self, module: Module) -> CoreResult<()> {
+        for function in module.functions {
+            let raw_callback = function.raw_callback
+                .ok_or(CoreError::Unknown)?;
+            let uid = function.uid
+                .ok_or(CoreError::UnknownFunctionUid)?;
+            self.foreign_functions.insert(uid, raw_callback);
+        }
+        for (_, module) in module.modules {
+            self.register_foreign_module(module)?;
+        }
         Ok(())
     }
 }

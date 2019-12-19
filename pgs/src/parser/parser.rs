@@ -738,6 +738,16 @@ impl Parser {
 
         // Swallow "var"
         lexer.advance();
+        
+        if lexer.token != Token::Text {
+            *lexer = lexer_backup;
+            return Err(ParseError::ExpectedVarName);
+        }
+
+        let var_name = String::from(lexer.slice());
+
+        // swallow var name
+        lexer.advance();
 
         // Parse ":"
         if lexer.token != Token::Colon {
@@ -753,15 +763,6 @@ impl Parser {
                 return Err(ParseError::UnknownType);
             }
         };
-
-        lexer.advance();
-        
-        if lexer.token != Token::Text {
-            *lexer = lexer_backup;
-            return Err(ParseError::ExpectedVarName);
-        }
-
-        let var_name = String::from(lexer.slice());
 
         lexer.advance();
 
