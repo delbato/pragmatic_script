@@ -1,6 +1,10 @@
 use super::{
     is::{
         Opcode
+    },
+    address::{
+        Address,
+        AddressType
     }
 };
 use crate::{
@@ -114,8 +118,8 @@ impl Core {
     pub fn get_opcode(&self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
-        println!("Getting opcode {:X} ...", program.code[self.ip]);
-        println!("Opcode: {:?}", Opcode::from(program.code[self.ip]));
+        //println!("Getting opcode {:X} ...", program.code[self.ip]);
+        //println!("Opcode: {:?}", Opcode::from(program.code[self.ip]));
         Ok(
             Opcode::from(program.code[self.ip])
         )
@@ -148,8 +152,10 @@ impl Core {
             program.get_size()
         };
 
+        //println!("Program length: {}", program_len);
+
         while self.ip < program_len {
-            println!("ip: {}", self.ip);
+            //println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
             self.ip += 1;
 
@@ -170,7 +176,11 @@ impl Core {
                 },
                 Opcode::POPN => {
                     let op: u64 = self.get_op()?;
+                    //println!("Stack size before POPN: {}", self.sp);
+                    //println!("Attempting to pop {} bytes off the stack", op);
+                    //println!("Stack pointer: {}", self.sp);
                     self.pop_n(op)?;
+                    //println!("Stack size after POPN: {}", self.sp);
                 },
                 Opcode::SDUPI => {
                     let op: i64 = self.get_op()?;
@@ -201,7 +211,7 @@ impl Core {
                 },
                 Opcode::RET => {
                     if self.call_stack.len() == 0 {
-                        println!("Call stack is empty. Halting the core...");
+                        //println!("Call stack is empty. Halting the core...");
                         break;
                     }
                     self.ret()?;
@@ -213,12 +223,12 @@ impl Core {
                 },
                 Opcode::SVSWPI => {
                     let op: i64 = self.pop_stack()?;
-                    println!("Swapping out int {}", op);
+                    //println!("Swapping out int {}", op);
                     self.save_swap(op)?;
                 },
                 Opcode::LDSWPI => {
                     let op: i64 = self.load_swap()?;
-                    println!("Swapping in int {}", op);
+                    //println!("Swapping in int {}", op);
                     self.push_stack(op)?;
                 },
                 Opcode::JMP => {
@@ -242,6 +252,18 @@ impl Core {
                     let lhs: i64 = self.pop_stack()?;
                     self.push_stack(lhs < rhs)?;
                 },
+                Opcode::SDUPA => {
+                    let op_offset: i64 = self.get_op()?;
+                    //println!("SDUPA offset: {}", op_offset);
+                    //println!("Stack size: {}", self.stack.len());
+                    self.dupn_stack(op_offset, 8)?;
+                },
+                Opcode::PUSHA => {
+                    let op: u64 = self.get_op()?;
+                    //println!("pushing addresss {}! ", op);
+                    self.push_stack(op)?;
+                    //println!("stack pointer: {}", self.sp);
+                },
                 _ => {
                     return Err(CoreError::UnimplementedOpcode(opcode));
                 }
@@ -254,7 +276,7 @@ impl Core {
     fn call(&mut self) -> CoreResult<()> {
         let fn_uid: u64 = self.get_op()?;
         if let Some(mut closure) = self.foreign_functions.remove(&fn_uid) {
-            println!("Executing foreign function...");
+            //println!("Executing foreign function...");
             closure(self)
                 .map_err(|_| CoreError::Unknown)?;
             self.foreign_functions.insert(fn_uid, closure);
@@ -298,6 +320,33 @@ impl Core {
         let addr = ((sp - offset) + 1) * -1;
 
         Ok(addr)
+    }
+
+    pub fn get_mem_string(&self, address: u64) -> CoreResult<String> {
+        let address = Address::from(address);
+        if address.address_type != AddressType::Program {
+            return Err(CoreError::Unknown)?;
+        }
+
+        let program = self.program.as_ref()
+            .ok_or(CoreError::Unknown)?;
+
+        let string_range = program
+            .static_pointers
+            .get(&(address.real_address as usize))
+            .cloned()
+            .ok_or(CoreError::Unknown)?;
+
+        let mut bytes = Vec::new();
+
+        for i in string_range {
+            bytes.push(program.code[i]);
+        }
+
+        let string = unsafe {
+            String::from_utf8_unchecked(bytes)
+        };
+        Ok(string)
     }
 
     #[inline]
@@ -471,6 +520,25 @@ impl Core {
         }
 
         Ok(())
+    }
+
+    #[inline]
+    pub fn get_stack<T: DeserializeOwned>(&self, offset: i64) -> CoreResult<T> {
+        let sp;
+        if offset < 0 {
+            sp = self.sp - i64::abs(offset) as usize;
+        } else {
+            sp = self.sp + i64::abs(offset) as usize;
+        }
+
+        let type_size = size_of::<T>();
+        let mut raw_bytes = Vec::new();
+        for i in sp..sp + type_size {
+            raw_bytes.push(self.stack[i]);
+        }
+
+        deserialize(&raw_bytes)
+            .map_err(|_| CoreError::OperatorDeserialize)
     }
 
     pub fn register_foreign_module(&mut self, module: Module) -> CoreResult<()> {

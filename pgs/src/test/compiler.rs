@@ -243,7 +243,7 @@ fn test_compile_return() {
     comp_builder.push_instr(ldswp_instr);
     comp_builder.push_instr(ret_instr);
 
-    println!("{:?}", compiler.builder.instructions);
+    //println!("{:?}", compiler.builder.instructions);
 
     let comp_code = comp_builder.build();
     let code = compiler.get_resulting_code();
@@ -315,7 +315,7 @@ pub fn test_compile_fn_decl() {
     comp_builder.push_instr(ldswp_instr);
     comp_builder.push_instr(ret_instr);
 
-    println!("{:?}", compiler.builder.instructions);
+    //println!("{:?}", compiler.builder.instructions);
 
     let main_uid = compiler.get_function_uid(&String::from("root::main"));
 
@@ -400,14 +400,14 @@ fn test_compile_expr_call() {
         comp_builder.push_instr(ret_instr);
     }
 
-    println!("Comparison builder instructions:");
+    //println!("Comparison builder instructions:");
     for instr in comp_builder.instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
     }
 
-    println!("Compiler builder instructions:");
+    //println!("Compiler builder instructions:");
     for instr in compiler.get_builder_ref().instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
     }
 
     let comp_code = comp_builder.build();
@@ -495,14 +495,14 @@ fn test_compile_expr_call_mod() {
         comp_builder.push_instr(ret_instr);
     }
 
-    println!("Comparison builder instructions:");
+    //println!("Comparison builder instructions:");
     for instr in comp_builder.instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
     }
 
-    println!("Compiler builder instructions:");
+    //println!("Compiler builder instructions:");
     for instr in compiler.get_builder_ref().instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
     }
 
     let comp_code = comp_builder.build();
@@ -550,12 +550,12 @@ fn test_compile_if() {
 
     assert!(cmp_res.is_ok());
 
-    println!("Instructions:");
+    //println!("Instructions:");
     for instr in compiler.get_builder_ref().instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
     }
 
-    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
+    //println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }
 
 use bincode::deserialize;
@@ -588,16 +588,16 @@ fn test_compile_if_stmt_list() {
         assert!(cmp_res.is_ok());
     }
 
-    println!("Instructions:");
+    //println!("Instructions:");
     for instr in compiler.get_builder_ref().instructions.iter() {
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
         if instr.opcode == Opcode::SMOVI {
             let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
-            println!("Operand for SMOVI: {}", operand);
+            //println!("Operand for SMOVI: {}", operand);
         }
     }
 
-    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
+    //println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }
 
 #[test]
@@ -657,21 +657,21 @@ fn test_compile_while_stmt_list() {
         assert!(cmp_res.is_ok());
     }
 
-    println!("Instructions:");
+    //println!("Instructions:");
     let mut size = 0;
     for instr in compiler.get_builder_ref().instructions.iter() {
         print!("Code pos: {}; ", size);
-        println!("{:?}", instr);
+        //println!("{:?}", instr);
         if instr.opcode == Opcode::SMOVI {
             let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
-            println!("Operand for SMOVI: {}", operand);
+            //println!("Operand for SMOVI: {}", operand);
         }
         if instr.opcode == Opcode::SDUPI {
             let operand: i64 = bincode::deserialize(&instr.operands).expect("Should be i64!");
-            println!("Operand for SDUPI: {}", operand);
+            //println!("Operand for SDUPI: {}", operand);
         }
         size += instr.get_size();
     }
 
-    println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
+    //println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }

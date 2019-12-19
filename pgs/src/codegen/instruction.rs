@@ -6,8 +6,14 @@ use crate::{
 
 
 
-use serde::Serialize;
-use bincode::serialize;
+use serde::{
+    Serialize,
+    de::DeserializeOwned
+};
+use bincode::{
+    deserialize,
+    serialize
+};
 
 #[derive(Clone, Debug)]
 pub struct Instruction {
@@ -53,5 +59,10 @@ impl Instruction {
 
     pub fn get_size(&self) -> usize {
         self.operands.len() + 1
+    }
+
+    pub fn get_operand<T: DeserializeOwned>(&self) -> T {
+        let t = deserialize(&self.operands).expect("ERROR Deserializing operand!");
+        t
     }
 }

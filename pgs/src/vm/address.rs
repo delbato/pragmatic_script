@@ -11,6 +11,7 @@ pub struct Address {
     pub address_type: AddressType
 }
 
+#[derive(PartialEq)]
 pub enum AddressType {
     Program,
     Stack,

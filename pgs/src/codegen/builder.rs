@@ -3,6 +3,11 @@ use super::{
         Instruction
     }
 };
+use crate::{
+    vm::{
+        is::Opcode
+    }
+};
 
 use std::{
     collections::{
@@ -19,8 +24,9 @@ use bincode::serialize;
 pub struct Builder {
     data: Vec<u8>,
     pub instructions: Vec<Instruction>,
+    pub jmp_instructions: Vec<usize>,
     labels: HashMap<String, usize>,
-    tags: HashMap<u64, usize>
+    pub tags: HashMap<u64, usize>
 }
 
 impl Builder {
@@ -29,7 +35,8 @@ impl Builder {
             data: Vec::new(),
             instructions: Vec::new(),
             labels: HashMap::new(),
-            tags: HashMap::new()
+            tags: HashMap::new(),
+            jmp_instructions: Vec::new()
         }
     }
 
@@ -47,6 +54,11 @@ impl Builder {
     }
 
     pub fn push_instr(&mut self, instruction: Instruction) {
+        if instruction.opcode == Opcode::JMP ||
+            instruction.opcode == Opcode::JMPT ||
+            instruction.opcode == Opcode::JMPF {
+            self.jmp_instructions.push(self.instructions.len());
+        }
         self.instructions.push(instruction);
     }
 

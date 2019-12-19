@@ -759,6 +759,9 @@ impl Parser {
             Token::Int => {
                 Type::Int
             },
+            Token::String => {
+                Type::String
+            },
             _ => {
                 return Err(ParseError::UnknownType);
             }
@@ -775,7 +778,7 @@ impl Parser {
 
         let expr = self.parse_expr(lexer, &[Token::Semicolon])?;
 
-        println!("Decl assignment expr: {:?}", expr);
+        //println!("Decl assignment expr: {:?}", expr);
 
         let var_decl_args = VariableDeclArgs {
             var_type: var_type,
@@ -1011,6 +1014,12 @@ impl Parser {
                 let int = String::from(lexer.slice()).parse::<i64>()
                     .map_err(|_| ParseError::Unknown)?;
                 let expr = Expression::IntLiteral(int);
+                operand_stack.push_front(expr);
+            }
+
+            if lexer.token == Token::StringLiteral {
+                let string = String::from(lexer.slice());
+                let expr = Expression::StringLiteral(string);
                 operand_stack.push_front(expr);
             }
 

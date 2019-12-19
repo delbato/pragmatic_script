@@ -132,7 +132,7 @@ fn test_engine_while() {
 
     let ret: i64 = pop_res.unwrap();
 
-    assert_eq!(ret, 9);
+    assert_eq!(ret, 10);
 }
 
 use crate::{
@@ -182,4 +182,56 @@ fn test_engine_foreign_function() {
     assert!(pop_res.is_ok());
 
     assert_eq!(pop_res.unwrap(), -127);
+}
+
+#[test]
+fn test_engine_foreign_function_string() {
+    let mut engine = Engine::new(128);
+
+    let function = Function::new(String::from("println"), Vec::new())
+        .with_argument(Type::String)
+        .with_return_type(Type::Int)
+        .with_callback(
+            Box::new(move |core: &mut Core| {
+                let string_addr: u64 = core.get_stack(-8)
+                    .map_err(|_| FunctionError::Unknown)?;
+                let string = core.get_mem_string(string_addr)
+                    .map_err(|_| FunctionError::Unknown)?;
+                println!("{}", string);
+                core.push_stack::<i64>(69)
+                    .map_err(|_| FunctionError::Unknown)
+            })
+        );
+    
+    let module = Module::new(String::from("std"))
+        .with_function(function);
+    
+    let reg_res = engine.register_module(module);
+    assert!(reg_res.is_ok());
+
+    let code = "
+        import std::println;
+
+        fn: main() ~ int {
+            var hello: string = \"Hello from PragmaticScript!\";
+            var ret: int = 0;
+            var i: int = 0;
+            while i < 10 {
+                ret = println(hello);
+                i = i + 1;
+            }
+            return ret;
+        }
+    ";
+
+    let load_res = engine.load_code(code);
+    assert!(load_res.is_ok());
+
+    let run_res = engine.run_fn(&String::from("root::main"));
+    assert!(run_res.is_ok());
+
+    let pop_res = engine.pop_stack::<i64>();
+    assert!(pop_res.is_ok());
+
+    assert_eq!(pop_res.unwrap(), 69);
 }
