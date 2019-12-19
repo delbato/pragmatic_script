@@ -61,8 +61,8 @@ cont: Point {
 import inner_module::add = add_fn;
 
 fn: main() {
-    var:int lhs = 1;
-    var:int rhs = 2;
+    var lhs: int = 1;
+    var rhs: int = 2;
     return add_fn(lhs, rhs);
 }
 ```
