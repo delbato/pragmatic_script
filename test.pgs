@@ -1,0 +1,18 @@
+import std::println;
+import std::printi;
+import std::print;
+
+fn: main() ~ int {
+    var hello: string = "Hello from PragmaticScript!";
+    var i: int = 0;
+    while i < 69 * 10 {
+        var tmp: int = printi(i);
+        var blub: int = println("");
+        //blub = printi(tmp);
+        //blub = println("");
+        blub = println(hello);
+        i = i + blub;
+    }
+    return i;
+}
+

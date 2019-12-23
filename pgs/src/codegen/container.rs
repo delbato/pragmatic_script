@@ -20,20 +20,20 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Container {
+pub struct ContainerDef {
     pub name: String,
-    pub members: BTreeMap<usize, ContainerMember> 
+    pub members: BTreeMap<usize, ContainerMemberDef> 
 }
 
 #[derive(Debug, Clone)]
-pub struct ContainerMember {
+pub struct ContainerMemberDef {
     pub name: String,
     pub var_type: Type
 }
 
-impl Container {
-    pub fn new(name: String) -> Container {
-        Container {
+impl ContainerDef {
+    pub fn new(name: String) -> ContainerDef {
+        ContainerDef {
             name: name,
             members: BTreeMap::new()
         }
@@ -62,11 +62,16 @@ impl Container {
         }
         Ok(byte_size)
     }
+
+    pub fn add_member(&mut self, member: ContainerMemberDef) {
+        let index = self.members.len();
+        self.members.insert(index, member);
+    }
 }
 
-impl ContainerMember {
-    pub fn new(name: String, var_type: Type) -> ContainerMember {
-        ContainerMember {
+impl ContainerMemberDef {
+    pub fn new(name: String, var_type: Type) -> ContainerMemberDef {
+        ContainerMemberDef {
             name: name, 
             var_type: var_type
         }

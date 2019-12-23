@@ -13,11 +13,13 @@ use crate::{
         }
     },
     codegen::{
-        container::Container
+        container::{
+            ContainerDef
+        }
     }
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionContext {
     pub variable_indices: HashMap<String, i64>,
     pub variable_types: HashMap<String, Type>,
@@ -95,7 +97,7 @@ pub struct ModuleContext {
     pub name: String,
     pub modules: HashMap<String, ModuleContext>,
     pub functions: HashMap<String, (u64, Type, BTreeMap<usize, (String, Type)>)>,
-    pub containers: HashMap<String, Container>,
+    pub containers: HashMap<String, ContainerDef>,
     pub imports: HashMap<String, String>
 }
 

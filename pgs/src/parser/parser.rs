@@ -16,8 +16,12 @@ use std::{
         BTreeMap
     },
     fmt::{
-        Debug
-    }
+        Debug,
+        Display,
+        Formatter,
+        Result as FmtResult
+    },
+    error::Error,
 };
 
 use logos::{
@@ -62,6 +66,14 @@ pub enum ParseError {
     ExpectedMod,
     ExpectedIf
 }
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for ParseError {}
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -586,6 +598,8 @@ impl Parser {
             Token::Semicolon
         ])?;
 
+        //println!("Parsing while with expr: {:?}", while_expr);
+
         if lexer.token == Token::Semicolon {
             return Ok(
                 Statement::While(Box::new(while_expr), Vec::new())
@@ -744,10 +758,15 @@ impl Parser {
             return Err(ParseError::ExpectedVarName);
         }
 
-        let var_name = String::from(lexer.slice());
+        let mut var_name = String::from(lexer.slice());
 
         // swallow var name
         lexer.advance();
+
+        if var_name.len() == 1 && lexer.token == Token::Text {
+            var_name += lexer.slice();
+            lexer.advance();
+        }
 
         // Parse ":"
         if lexer.token != Token::Colon {
@@ -778,7 +797,7 @@ impl Parser {
 
         let expr = self.parse_expr(lexer, &[Token::Semicolon])?;
 
-        //println!("Decl assignment expr: {:?}", expr);
+        ////println!("Decl assignment expr: {:?}", expr);
 
         let var_decl_args = VariableDeclArgs {
             var_type: var_type,
@@ -862,7 +881,10 @@ impl Parser {
     }
 
     pub fn parse_expr_push(&self, operand_stack: &mut VecDeque<Expression>, operator_stack: &mut VecDeque<Token>) -> ParseResult<Expression> {
+        //println!("parse_expr_push(): operator stack len {}", operator_stack.len());
+        //println!("parse_expr_push(): operand stack len {}", operand_stack.len());
         let op = operator_stack.pop_front().unwrap();
+        //println!("parse_expr_push(): operator {:?}", op);
         let expr = match op {
             Token::Plus => {
                 let rhs = operand_stack.pop_front().unwrap();
@@ -931,10 +953,32 @@ impl Parser {
         if lexer.token != Token::Text {
             return Err(ParseError::ExpectedFunctionName);
         }
+        
+        let mut full_fn_name = String::new();
 
-        let fn_name = String::from(lexer.slice());
-        // Swallow fn name
-        lexer.advance();
+        loop {
+            if lexer.token != Token::Text {
+                return Err(ParseError::ExpectedFunctionName);
+            }
+
+            full_fn_name += lexer.slice();
+
+            // Swallow fn name
+            lexer.advance();
+
+            if lexer.token != Token::DoubleColon {
+                break;
+            }
+
+            // Swallow "::"
+            lexer.advance();
+
+            full_fn_name += "::";
+        }
+
+        if full_fn_name.is_empty() {
+            return Err(ParseError::ExpectedFunctionName);
+        }
 
         if lexer.token != Token::OpenParan {
             *lexer = lexer_backup;
@@ -963,7 +1007,7 @@ impl Parser {
         lexer.advance();
 
         Ok(
-            Expression::Call(fn_name, params)
+            Expression::Call(full_fn_name, params)
         )
     }
 

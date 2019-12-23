@@ -42,13 +42,25 @@ fn test_engine_run() {
 
 #[test]
 fn test_engine_call() {
+    // PUSHI 10 : 10
+    // SVSWPI : 
+    // POPN 0
+    // LDSWPI : 10
+    // RET
+
+    // PUSHI 0 : 0(-8)
+    // CALL ten : 0(-16),10(-8)
+    // SDUPI -16: 0(-24),10(-16),0(-8)
+    // SVSWPI : 0(-16), 10(-8)
+    // POPN 16 : 
     let code = "
         fn: ten() ~ int {
             return 10;
         }
         fn: main(argc: int) ~ int {
             var y: int = 0;
-            y = argc * ten();
+            var value: int = ten();
+            // y = argc * ten();
             return y;
         }
     ";
@@ -67,7 +79,7 @@ fn test_engine_call() {
     let pop_res = engine.pop_stack::<i64>();
     assert!(pop_res.is_ok());
 
-    assert_eq!(pop_res.unwrap(), 50);
+    assert_eq!(pop_res.unwrap(), 0);
 }
 
 #[test]

@@ -28,11 +28,11 @@ use super::{
         LoopContext,
         LoopType
     },
-    program::Program,
     container::{
-        Container,
-        ContainerMember
+        ContainerDef,
+        ContainerMemberDef
     },
+    program::Program,
     data::Data
 };
 
@@ -42,6 +42,12 @@ use std::{
         HashMap,
         HashSet,
         BTreeMap
+    },
+    error::Error,
+    fmt::{
+        Display,
+        Formatter,
+        Result as FmtResult
     }
 };
 
@@ -86,6 +92,14 @@ pub enum CompilerError {
     ExpectedBreak,
     ExpectedContinue
 }
+
+impl Display for CompilerError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for CompilerError {}
 
 impl Compiler {
     pub fn new() -> Compiler {
@@ -159,7 +173,7 @@ impl Compiler {
         let front_mod_ctx = self.mod_context_stack.get_mut(0)
             .ok_or(CompilerError::UnknownModule)?;
 
-        //println!("Registering module {} in module {}", mod_context.name, front_mod_ctx.name);
+        ////println!"Registering module {} in module {}", mod_context.name, front_mod_ctx.name);
 
         front_mod_ctx.modules.insert(mod_context.name.clone(), mod_context);
 
@@ -199,10 +213,10 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
-    pub fn resolve_cont(&self, name: &String) -> CompilerResult<Container> {
+    pub fn resolve_cont(&self, name: &String) -> CompilerResult<ContainerDef> {
         // If directly accessing via module namespace
         if name.contains("::") {
-            //println!("Module accessor!");
+            ////println!"Module accessor!");
             let path = self.get_module_path(&name);
 
             let mut mod_ctx;
@@ -217,7 +231,7 @@ impl Compiler {
             }
             // Module access relative to this current module
             else {
-                //println!("Accessing from current module...");
+                ////println!"Accessing from current module...");
                 mod_ctx = self.get_current_module()?;
                 offset = 0;
             }
@@ -271,7 +285,7 @@ impl Compiler {
     pub fn resolve_fn(&self, name: &String) -> CompilerResult<(u64, Type, BTreeMap<usize, (String, Type)>)> {
         // If directly accessing via module namespace
         if name.contains("::") {
-            //println!("Module accessor!");
+            ////println!"Module accessor!");
             let path = self.get_module_path(&name);
 
             let mut mod_ctx;
@@ -286,7 +300,7 @@ impl Compiler {
             }
             // Module access relative to this current module
             else {
-                //println!("Accessing from current module...");
+                ////println!"Accessing from current module...");
                 mod_ctx = self.get_current_module()?;
                 offset = 0;
             }
@@ -301,8 +315,8 @@ impl Compiler {
                     .ok_or(CompilerError::Unknown)?;
             }
 
-            //println!("Getting function {} from module {}...", canonical_fn_name, mod_ctx.name);
-            //println!("Module {} fn decls: {}", mod_ctx.name, mod_ctx.functions.len());
+            ////println!"Getting function {} from module {}...", canonical_fn_name, mod_ctx.name);
+            ////println!"Module {} fn decls: {}", mod_ctx.name, mod_ctx.functions.len());
 
             return mod_ctx.functions.get(&canonical_fn_name)
                 .cloned()
@@ -474,6 +488,7 @@ impl Compiler {
         let mut functions = HashMap::new();
 
         let mut data = self.data.get_bytes();
+        println!("Data length: {}", data.len());
         let pointers = self.data.get_pointers();
 
         for (fn_name, fn_uid) in self.function_uid_map.iter() {
@@ -495,7 +510,14 @@ impl Compiler {
             jmp_addr += data.len() as u64;
             instr.clear_operands();
             instr.append_operand(&jmp_addr);
-        } 
+        }
+
+        println!("Instructions:");
+        let mut offset = 0;
+        for instr in builder.instructions.iter() {
+            println!("offset {}: {:?}", offset, instr);
+            offset += instr.get_size();
+        }
 
         let mut code = builder.build();
         data.append(&mut code);
@@ -563,11 +585,11 @@ impl Compiler {
         let mod_name = {
             self.get_current_module()?.name.clone()
         };
-        //println!("Declaring decl list for current module {}...", mod_name);
+        ////println!"Declaring decl list for current module {}...", mod_name);
         for decl in decl_list.iter() {
             self.decl_decl(decl)?;
         }
-        //println!("Done declaring decl list for current module {}.", mod_name);
+        ////println!"Done declaring decl list for current module {}.", mod_name);
         Ok(())
     }
 
@@ -592,7 +614,7 @@ impl Compiler {
             self.get_current_module()?.name.clone()
         };
 
-        //println!("Declaring import({} as {}) for current module {}!", import_path, import_name, mod_name);
+        ////println!"Declaring import({} as {}) for current module {}!", import_path, import_name, mod_name);
 
         let mod_ctx = self.get_current_module_mut()?;
         mod_ctx.imports.insert(import_name, import_path);
@@ -612,7 +634,7 @@ impl Compiler {
             self.get_current_module()?.name.clone()
         };
 
-        //println!("Declaring function {} with uid {} for current module {}!", fn_decl_args.name, uid, mod_name);
+        ////println!"Declaring function {} with uid {} for current module {}!", fn_decl_args.name, uid, mod_name);
 
         let fn_tuple = (uid, fn_decl_args.returns.clone(), fn_decl_args.arguments.clone());
 
@@ -638,9 +660,9 @@ impl Compiler {
         let front_mod_ctx = self.mod_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
 
-        let mut container = Container::new(cont_name.clone());
+        let mut container = ContainerDef::new(cont_name.clone());
         for (i, (var_name, var_type)) in cont_decl_args.members.iter() {
-            let member = ContainerMember::new(var_name.clone(), var_type.clone());
+            let member = ContainerMemberDef::new(var_name.clone(), var_type.clone());
             container.members.insert(*i, member);
         }
 
@@ -660,7 +682,7 @@ impl Compiler {
         let old_mod_name = {
             self.get_current_module()?.name.clone()
         };
-        //println!("Declaring module {} for current module {}!", mod_name, old_mod_name);
+        ////println!"Declaring module {} for current module {}!", mod_name, old_mod_name);
         let mut mod_context = ModuleContext::new(mod_name.clone());
         self.mod_context_stack.push_front(mod_context);
         self.decl_decl_list(decl_list)?;
@@ -702,7 +724,7 @@ impl Compiler {
                         .cloned()
                         .ok_or(CompilerError::UnknownModule)?
                 };
-                //println!("Compiling module {} with {} function declarations!", mod_ctx.name, mod_ctx.functions.len());
+                ////println!"Compiling module {} with {} function declarations!", mod_ctx.name, mod_ctx.functions.len());
                 self.mod_context_stack.push_front(mod_ctx);
                 self.compile_decl_list(decl_list)?;
                 self.mod_context_stack.pop_front();
@@ -1023,7 +1045,6 @@ impl Compiler {
             .with_operand(&fn_uid);
         self.builder.push_instr(call_instr);
 
-
         let size = self.size_of_type(&fn_ret_type)?;
 
         let front_context = self.fn_context_stack.get_mut(0)
@@ -1076,6 +1097,7 @@ impl Compiler {
         };
 
         let size = self.size_of_type(&fn_type)?;
+
         let mut stack_size = {
             let mut ret = 0;
             for i in 0..=fn_index {
@@ -1086,13 +1108,21 @@ impl Compiler {
             ret
         };
 
-        //println!("Stack size of current fn context: {}", stack_size);
+        //println!("Stack size until return (including copy): {}", stack_size);
+
+        ////println!"Stack size of current fn context: {}", stack_size);
 
         stack_size -= size;
         
+        //println!("Stack size until return (excluding copy): {}", stack_size);
+
+        println!("Stack size to be popped off: {}", stack_size);
+
         // Pop everything off the stack
         let popn_instr = Instruction::new(Opcode::POPN)
             .with_operand::<u64>(&(stack_size as u64));
+        
+        println!("POPN instr: {:?}", popn_instr);
 
         // Load return value from swap space
         let ld_swap_instr = match fn_type {
@@ -1126,22 +1156,28 @@ impl Compiler {
 
         let size = self.size_of_type(&var_decl_args.var_type)?;
         let var_type = var_decl_args.var_type.clone();
-        // Insert variable to context
-        {
-            let front_context = self.fn_context_stack.get_mut(0)
-                .ok_or(CompilerError::Unknown)?;
-            front_context.push_var((var_decl_args.name.clone(), var_type.clone()));
-        }
+
+        //println!"Compiling var decl: {:?}", var_decl_args);
 
         let checker = Checker::new(&self);
         let expr_type = checker.check_expr_type(&var_decl_args.assignment)
             .map_err(|_| CompilerError::TypeMismatch)?;
+        println!("Var type: {:?}", var_type);
+        println!("Expr type of var decl: {:?}", expr_type);
 
         if expr_type != var_type {
             return Err(CompilerError::TypeMismatch);
         }
 
         self.compile_expr(&var_decl_args.assignment)?;
+
+        // Insert variable to context
+        {
+            let front_context = self.fn_context_stack.get_mut(0)
+                .ok_or(CompilerError::Unknown)?;
+            front_context.set_var((front_context.stack_size - size) as i64, (var_decl_args.name.clone(), var_type.clone()));
+            println!("Var decl (name: {}) at stack index: {}", var_decl_args.name, front_context.stack_size - size);
+        }
 
         Ok(())
     }
@@ -1169,12 +1205,18 @@ impl Compiler {
             front_context.offset_of(&var_name)
                 .ok_or(CompilerError::UnknownVariable)?
         };
+       //println!("Var assign (name={}) offset of var: {}", var_name, var_offset);
+
+        //println!"Var offset for var assign to {}: {}", var_name, var_offset);
+
+        println!("Compiling var assign to var {} which has offset {}", var_name, var_offset);
 
         let mov_instr = match var_type {
             Type::Int => {
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size -= 8;
+                //println!"Stack size after MOVI: {}", front_context.stack_size);
                 Instruction::new(Opcode::SMOVI)
                     .with_operand(&var_offset)
             },
@@ -1182,6 +1224,8 @@ impl Compiler {
                 return Err(CompilerError::NotImplemented);
             }
         };
+
+
 
         self.builder.push_instr(mov_instr);
 
@@ -1196,9 +1240,13 @@ impl Compiler {
         
         let front_fn_ctx = self.fn_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
-        
+
         let (fn_uid, fn_ret_type, fn_args) = self.resolve_fn(name)?;
-        
+
+        println!("Calling fn {}", name);
+
+        //println!"Compiling fn {} ({:?}) ~ {:?}", name, args, fn_ret_type);
+
         let mut i = 0;
         for arg_expr in args.iter() {
             let req_fn_arg = fn_args.get(&i)
@@ -1221,13 +1269,17 @@ impl Compiler {
 
         let fn_ret_type_size = self.size_of_type(&fn_ret_type)?;
 
-        //println!("Compiling expr call with args {:?} and ret_type {:?}", fn_args, fn_ret_type);
+        //println!"fn_ret_type_size: {}", fn_ret_type_size);
+
+        ////println!"Compiling expr call with args {:?} and ret_type {:?}", fn_args, fn_ret_type);
 
         let front_context = self.fn_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
         front_context.stack_size += fn_ret_type_size;
 
-        //println!("front context stack size: {}", front_context.stack_size);
+        //println!"front context after call expr: {:?}", front_context);
+
+        ////println!"front context stack size: {}", front_context.stack_size);
 
         Ok(())
     }
@@ -1276,6 +1328,7 @@ impl Compiler {
                     front_context.offset_of(var_name)
                         .ok_or(CompilerError::UnknownVariable)?
                 };
+                println!("Compiling var expr. Name = {}, offset = {}", var_name, var_offset);
                 let var_type = {
                     self.type_of_var(var_name)?
                 };
@@ -1290,8 +1343,10 @@ impl Compiler {
                     },
                     _ => return Err(CompilerError::NotImplemented)  
                 };
+                println!("dup instruction for var expr: {:?}", dup_instr);
                 self.builder.push_instr(dup_instr);
                 let var_size = self.size_of_type(&var_type)?;
+                //println!"Compiling var expr. size: {}", var_size);
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size += var_size;

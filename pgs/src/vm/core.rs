@@ -29,7 +29,14 @@ use std::{
     cell::{
         RefCell
     },
-    ops::Range
+    ops::Range,
+    fmt::{
+        Debug,
+        Display,
+        Formatter,
+        Result as FmtResult
+    },
+    error::Error
 };
 
 use serde::{
@@ -81,6 +88,15 @@ pub enum CoreError {
     InvalidStackPointer
 }
 
+impl Display for CoreError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for CoreError {
+}
+
 impl Core {
     pub fn new(stack_size: usize) -> Core {
         let mut stack = Vec::new();
@@ -115,13 +131,16 @@ impl Core {
     }
 
     #[inline]
-    pub fn get_opcode(&self) -> CoreResult<Opcode> {
+    pub fn get_opcode(&mut self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
         //println!("Getting opcode {:X} ...", program.code[self.ip]);
         //println!("Opcode: {:?}", Opcode::from(program.code[self.ip]));
+        let opcode = Opcode::from(program.code[self.ip]);
+        self.ip += 1;
+        
         Ok(
-            Opcode::from(program.code[self.ip])
+            opcode
         )
     }
 
@@ -157,7 +176,8 @@ impl Core {
         while self.ip < program_len {
             //println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
-            self.ip += 1;
+            println!("Stack values: {:?}", &self.stack[0..self.sp]);
+            println!("IP: {}", self.ip);
 
             match opcode {
                 Opcode::NOOP => {
@@ -176,11 +196,11 @@ impl Core {
                 },
                 Opcode::POPN => {
                     let op: u64 = self.get_op()?;
-                    //println!("Stack size before POPN: {}", self.sp);
-                    //println!("Attempting to pop {} bytes off the stack", op);
-                    //println!("Stack pointer: {}", self.sp);
+                    println!("Stack size before POPN: {}", self.sp);
+                    println!("Attempting to pop {} bytes off the stack", op);
+                    println!("Stack pointer: {}", self.sp);
                     self.pop_n(op)?;
-                    //println!("Stack size after POPN: {}", self.sp);
+                    println!("Stack size after POPN: {}", self.sp);
                 },
                 Opcode::SDUPI => {
                     let op: i64 = self.get_op()?;
@@ -223,12 +243,12 @@ impl Core {
                 },
                 Opcode::SVSWPI => {
                     let op: i64 = self.pop_stack()?;
-                    //println!("Swapping out int {}", op);
+                    println!("Swapping out int {}", op);
                     self.save_swap(op)?;
                 },
                 Opcode::LDSWPI => {
                     let op: i64 = self.load_swap()?;
-                    //println!("Swapping in int {}", op);
+                    println!("Swapping in int {}", op);
                     self.push_stack(op)?;
                 },
                 Opcode::JMP => {
@@ -406,6 +426,7 @@ impl Core {
         let program = &self.program.as_ref().unwrap().code;
 
         let raw_bytes: &[u8] = &program[self.ip..self.ip + op_size];
+        println!("get_op raw bytes: {:?}", raw_bytes);
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
@@ -462,6 +483,8 @@ impl Core {
         }
         
         let tmp_sp = (self.sp as i64 + offset) as usize;
+        
+        println!("Duplicating stack from {} to {}", tmp_sp, tmp_sp + size);
 
         for i in 0..size {
             self.stack[self.sp + i] = self.stack[tmp_sp + i];
@@ -539,6 +562,11 @@ impl Core {
 
         deserialize(&raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)
+    }
+
+    #[inline]
+    pub fn get_stack_size(&self) -> usize {
+        self.sp
     }
 
     pub fn register_foreign_module(&mut self, module: Module) -> CoreResult<()> {
