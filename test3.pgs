@@ -1,0 +1,9 @@
+fn: ten() ~ int {
+    return 10;
+}
+fn: main() ~ int {
+    var y: int = 5;
+    var value: int = ten();
+    y = y * value;
+    return y;
+}

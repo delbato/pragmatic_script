@@ -1043,12 +1043,24 @@ impl Parser {
             }
             
             if lexer.token == Token::Text {
-                let mut expr;
+                let expr;
                 let call_expr_res = self.try_parse_call_expr(lexer);
                 if call_expr_res.is_ok() {
                     expr = call_expr_res.unwrap();
                 } else {
-                    let var_name = String::from(lexer.slice());
+                    let mut var_name = String::from(lexer.slice());
+                    
+                    if var_name.len() == 1 {
+                        let lexer_backup = lexer.clone();
+                        lexer.advance();
+                        
+                        if lexer.token == Token::Text {
+                            var_name += lexer.slice();
+                        } else {
+                            *lexer = lexer_backup;
+                        }
+                    }
+
                     expr = Expression::Variable(var_name);
                 }
                 operand_stack.push_front(expr);

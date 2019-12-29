@@ -488,7 +488,7 @@ impl Compiler {
         let mut functions = HashMap::new();
 
         let mut data = self.data.get_bytes();
-        println!("Data length: {}", data.len());
+        //println!("Data length: {}", data.len());
         let pointers = self.data.get_pointers();
 
         for (fn_name, fn_uid) in self.function_uid_map.iter() {
@@ -512,10 +512,10 @@ impl Compiler {
             instr.append_operand(&jmp_addr);
         }
 
-        println!("Instructions:");
+        //println!("Instructions:");
         let mut offset = 0;
         for instr in builder.instructions.iter() {
-            println!("offset {}: {:?}", offset, instr);
+            //println!("offset {}: {:?}", offset, instr);
             offset += instr.get_size();
         }
 
@@ -1116,13 +1116,13 @@ impl Compiler {
         
         //println!("Stack size until return (excluding copy): {}", stack_size);
 
-        println!("Stack size to be popped off: {}", stack_size);
+        //println!("Stack size to be popped off: {}", stack_size);
 
         // Pop everything off the stack
         let popn_instr = Instruction::new(Opcode::POPN)
             .with_operand::<u64>(&(stack_size as u64));
         
-        println!("POPN instr: {:?}", popn_instr);
+        //println!("POPN instr: {:?}", popn_instr);
 
         // Load return value from swap space
         let ld_swap_instr = match fn_type {
@@ -1162,8 +1162,8 @@ impl Compiler {
         let checker = Checker::new(&self);
         let expr_type = checker.check_expr_type(&var_decl_args.assignment)
             .map_err(|_| CompilerError::TypeMismatch)?;
-        println!("Var type: {:?}", var_type);
-        println!("Expr type of var decl: {:?}", expr_type);
+        //println!("Var type: {:?}", var_type);
+        //println!("Expr type of var decl: {:?}", expr_type);
 
         if expr_type != var_type {
             return Err(CompilerError::TypeMismatch);
@@ -1176,7 +1176,7 @@ impl Compiler {
             let front_context = self.fn_context_stack.get_mut(0)
                 .ok_or(CompilerError::Unknown)?;
             front_context.set_var((front_context.stack_size - size) as i64, (var_decl_args.name.clone(), var_type.clone()));
-            println!("Var decl (name: {}) at stack index: {}", var_decl_args.name, front_context.stack_size - size);
+            //println!("Var decl (name: {}) at stack index: {}", var_decl_args.name, front_context.stack_size - size);
         }
 
         Ok(())
@@ -1209,7 +1209,7 @@ impl Compiler {
 
         //println!"Var offset for var assign to {}: {}", var_name, var_offset);
 
-        println!("Compiling var assign to var {} which has offset {}", var_name, var_offset);
+        //println!("Compiling var assign to var {} which has offset {}", var_name, var_offset);
 
         let mov_instr = match var_type {
             Type::Int => {
@@ -1243,7 +1243,7 @@ impl Compiler {
 
         let (fn_uid, fn_ret_type, fn_args) = self.resolve_fn(name)?;
 
-        println!("Calling fn {}", name);
+        //println!("Calling fn {}", name);
 
         //println!"Compiling fn {} ({:?}) ~ {:?}", name, args, fn_ret_type);
 
@@ -1328,7 +1328,7 @@ impl Compiler {
                     front_context.offset_of(var_name)
                         .ok_or(CompilerError::UnknownVariable)?
                 };
-                println!("Compiling var expr. Name = {}, offset = {}", var_name, var_offset);
+                //println!("Compiling var expr. Name = {}, offset = {}", var_name, var_offset);
                 let var_type = {
                     self.type_of_var(var_name)?
                 };
@@ -1343,7 +1343,7 @@ impl Compiler {
                     },
                     _ => return Err(CompilerError::NotImplemented)  
                 };
-                println!("dup instruction for var expr: {:?}", dup_instr);
+                //println!("dup instruction for var expr: {:?}", dup_instr);
                 self.builder.push_instr(dup_instr);
                 let var_size = self.size_of_type(&var_type)?;
                 //println!"Compiling var expr. size: {}", var_size);

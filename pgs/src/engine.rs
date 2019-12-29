@@ -109,7 +109,7 @@ impl Engine {
         file.read_to_string(&mut file_content)
             .map_err(|_| Box::new(EngineError::Unknown))?;
 
-       self.run_code(&file_content)
+        self.run_code(&file_content)
     }
 
     pub fn run_stream(&mut self, readable: Box<dyn Read>) -> EngineResult<()> {

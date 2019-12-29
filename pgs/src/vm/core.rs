@@ -176,8 +176,8 @@ impl Core {
         while self.ip < program_len {
             //println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
-            println!("Stack values: {:?}", &self.stack[0..self.sp]);
-            println!("IP: {}", self.ip);
+            //println!("Stack values: {:?}", &self.stack[0..self.sp]);
+            //println!("IP: {}", self.ip);
 
             match opcode {
                 Opcode::NOOP => {
@@ -196,11 +196,11 @@ impl Core {
                 },
                 Opcode::POPN => {
                     let op: u64 = self.get_op()?;
-                    println!("Stack size before POPN: {}", self.sp);
-                    println!("Attempting to pop {} bytes off the stack", op);
-                    println!("Stack pointer: {}", self.sp);
+                    //println!("Stack size before POPN: {}", self.sp);
+                    //println!("Attempting to pop {} bytes off the stack", op);
+                    //println!("Stack pointer: {}", self.sp);
                     self.pop_n(op)?;
-                    println!("Stack size after POPN: {}", self.sp);
+                    //println!("Stack size after POPN: {}", self.sp);
                 },
                 Opcode::SDUPI => {
                     let op: i64 = self.get_op()?;
@@ -243,12 +243,12 @@ impl Core {
                 },
                 Opcode::SVSWPI => {
                     let op: i64 = self.pop_stack()?;
-                    println!("Swapping out int {}", op);
+                    //println!("Swapping out int {}", op);
                     self.save_swap(op)?;
                 },
                 Opcode::LDSWPI => {
                     let op: i64 = self.load_swap()?;
-                    println!("Swapping in int {}", op);
+                    //println!("Swapping in int {}", op);
                     self.push_stack(op)?;
                 },
                 Opcode::JMP => {
@@ -309,6 +309,9 @@ impl Core {
         let new_ip = program.functions.get(&fn_uid)
             .ok_or(CoreError::UnknownFunctionUid)?;
 
+        
+        let old_ip = self.ip;
+        self.call_stack.push_front(old_ip);
         self.ip = *new_ip;
 
         Ok(())
@@ -426,7 +429,7 @@ impl Core {
         let program = &self.program.as_ref().unwrap().code;
 
         let raw_bytes: &[u8] = &program[self.ip..self.ip + op_size];
-        println!("get_op raw bytes: {:?}", raw_bytes);
+        //println!("get_op raw bytes: {:?}", raw_bytes);
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
@@ -484,7 +487,7 @@ impl Core {
         
         let tmp_sp = (self.sp as i64 + offset) as usize;
         
-        println!("Duplicating stack from {} to {}", tmp_sp, tmp_sp + size);
+        //println!("Duplicating stack from {} to {}", tmp_sp, tmp_sp + size);
 
         for i in 0..size {
             self.stack[self.sp + i] = self.stack[tmp_sp + i];

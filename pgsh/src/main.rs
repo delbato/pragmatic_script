@@ -59,7 +59,6 @@ fn bootstrap_engine(engine: &mut Engine) {
                 let string = core.get_mem_string(string_addr)
                     .map_err(|_| FunctionError::Unknown)?;
                 print!("{}", string);
-                println!("Pushing 69 on stack...");
                 core.push_stack::<i64>(69)
                     .map_err(|_| FunctionError::Unknown)
             })
@@ -92,6 +91,7 @@ fn build_app<'a>() -> App<'a, 'a> {
     App::new("pgsh")
         .author("Daniel Wanner <daniel.wanner@pm.me>")
         .about("PragmaticScript shell interpreter")
+        .version("0.1.0")
         .arg(
             Arg::with_name("filename")
                 .index(1)
@@ -116,11 +116,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     engine.run_file(Path::new(filename))?;
 
-    println!("Script run. stack size: {}", engine.get_stack_size());
+    //println!("Script run. stack size: {}", engine.get_stack_size());
 
     let exit_code = engine.pop_stack::<i64>()?;
 
-    println!("Script exited. Stack size: {}, Exit code: 0x{:X}/{}", engine.get_stack_size(), exit_code, exit_code);
+    //println!("Script exited. Stack size: {}, Exit code: 0x{:X}/{}", engine.get_stack_size(), exit_code, exit_code);
 
-    Ok(())
+    std::process::exit(exit_code as i32);
 }
