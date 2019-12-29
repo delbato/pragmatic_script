@@ -318,20 +318,29 @@ impl Parser {
         }
         lexer.advance();
 
-        if lexer.token != Token::FnReturn {
+        if lexer.token != Token::Tilde {
             return Err(ParseError::ReturnTypeMissing);
         }
         lexer.advance();
 
         let fn_return_type = match lexer.token {
-            Token::Float => {
-                Type::Float
-            },
-            Token::Int => {
-                Type::Int
-            },
-            Token::String => {
-                Type::String
+            Token::Int => Type::Int,
+            Token::Float => Type::Float,
+            Token::String => Type::String,
+            Token::Bool => Type::Bool,
+            Token::Text => {
+                let mut type_name = String::from(lexer.slice());
+                // Workaround for broken Lexer
+                if type_name.len() == 1 {
+                    let lexer_backup = lexer.clone();
+                    lexer.advance();
+                    if lexer.token == Token::Text {
+                        type_name += lexer.slice();
+                    } else {
+                        *lexer = lexer_backup;
+                    }
+                }
+                Type::Other(type_name)
             },
             _ => {
                 return Err(ParseError::UnknownType);
@@ -446,7 +455,7 @@ impl Parser {
             return Err(ParseError::Unknown);
         }
 
-        // Swallow "struct"
+        // Swallow "cont"
         lexer.advance();
 
         if lexer.token != Token::Colon {
@@ -535,8 +544,18 @@ impl Parser {
             Token::String => Type::String,
             Token::Bool => Type::Bool,
             Token::Text => {
-                let type_name = String::from(lexer.slice());
-                Type::Container(type_name)
+                let mut type_name = String::from(lexer.slice());
+                // Workaround for broken Lexer
+                if type_name.len() == 1 {
+                    let lexer_backup = lexer.clone();
+                    lexer.advance();
+                    if lexer.token == Token::Text {
+                        type_name += lexer.slice();
+                    } else {
+                        *lexer = lexer_backup;
+                    }
+                }
+                Type::Other(type_name)
             },
             _ => return Err(ParseError::ExpectedMemberType)
         };
@@ -775,11 +794,23 @@ impl Parser {
         lexer.advance();
 
         let var_type = match lexer.token {
-            Token::Int => {
-                Type::Int
-            },
-            Token::String => {
-                Type::String
+            Token::Int => Type::Int,
+            Token::Float => Type::Float,
+            Token::String => Type::String,
+            Token::Bool => Type::Bool,
+            Token::Text => {
+                let mut type_name = String::from(lexer.slice());
+                // Workaround for broken Lexer
+                if type_name.len() == 1 {
+                    let lexer_backup = lexer.clone();
+                    lexer.advance();
+                    if lexer.token == Token::Text {
+                        type_name += lexer.slice();
+                    } else {
+                        *lexer = lexer_backup;
+                    }
+                }
+                Type::Other(type_name)
             },
             _ => {
                 return Err(ParseError::UnknownType);

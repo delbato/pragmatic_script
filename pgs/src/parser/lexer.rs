@@ -143,7 +143,7 @@ pub enum Token {
     GreaterThanEquals,
 
     #[token = "~"]
-    FnReturn,
+    Tilde,
 
     #[token = "return"]
     Return,

@@ -1080,8 +1080,10 @@ impl Compiler {
 
         self.compile_expr(&ret_expr)?;
 
+        let size = self.size_of_type(&fn_type)?;
+
         // Save return value to swap space
-        let sv_swap_instr = match fn_type {
+        let sv_swap_instr = match &fn_type {
             Type::Int => {
                 Instruction::new(Opcode::SVSWPI)
             },
@@ -1091,12 +1093,18 @@ impl Compiler {
             Type::Float => {
                 Instruction::new(Opcode::SVSWPF)
             },
+            Type::Reference(_) => {
+                Instruction::new(Opcode::SVSWPN)
+                    .with_operand::<u64>(&8)
+            },
+            Type::Other(_) => {
+                Instruction::new(Opcode::SVSWPN)
+                    .with_operand::<u64>(&(size as u64))
+            },
             _ => {
                 return Err(CompilerError::Unknown);
             }
         };
-
-        let size = self.size_of_type(&fn_type)?;
 
         let mut stack_size = {
             let mut ret = 0;
@@ -1125,7 +1133,7 @@ impl Compiler {
         //println!("POPN instr: {:?}", popn_instr);
 
         // Load return value from swap space
-        let ld_swap_instr = match fn_type {
+        let ld_swap_instr = match &fn_type {
             Type::Int => {
                 Instruction::new(Opcode::LDSWPI)
             },
@@ -1135,14 +1143,23 @@ impl Compiler {
             Type::Float => {
                 Instruction::new(Opcode::LDSWPF)
             },
+            Type::Reference(_) => {
+                Instruction::new(Opcode::LDSWPN)
+                    .with_operand::<u64>(&8)
+            },
+            Type::Other(_) => {
+                Instruction::new(Opcode::LDSWPN)
+                    .with_operand::<u64>(&(size as u64))
+            },
             _ => {
                 return Err(CompilerError::Unknown);
             }
         };
-
-        self.builder.push_instr(sv_swap_instr);
-        self.builder.push_instr(popn_instr);
-        self.builder.push_instr(ld_swap_instr);
+        if stack_size > 0 {
+            self.builder.push_instr(sv_swap_instr);
+            self.builder.push_instr(popn_instr);
+            self.builder.push_instr(ld_swap_instr);
+        }
         self.builder.push_instr(Instruction::new(Opcode::RET));
 
         Ok(())

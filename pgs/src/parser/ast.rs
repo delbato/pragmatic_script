@@ -142,7 +142,7 @@ pub enum Type {
     Auto,
     Array(Box<Type>, usize),
     AutoArray(Box<Type>),
-    Container(String),
+    Other(String),
     Tuple(Vec<Type>),
     Reference(Box<Type>)
 }
