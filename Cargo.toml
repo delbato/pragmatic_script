@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "pgs",
-    "pgsh"
+    "pgsh",
+    "pgs-std",
+    "pgs-derive"
 ]
 
 [profile.release]

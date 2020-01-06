@@ -161,7 +161,7 @@ use crate::{
 fn test_engine_foreign_function() {
     let mut engine = Engine::new(128);
 
-    let function = Function::new(String::from("geti"), Vec::new())
+    let function = Function::new(String::from("geti"))
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
@@ -200,7 +200,7 @@ fn test_engine_foreign_function() {
 fn test_engine_foreign_function_string() {
     let mut engine = Engine::new(128);
 
-    let function = Function::new(String::from("println"), Vec::new())
+    let function = Function::new(String::from("println"))
         .with_argument(Type::String)
         .with_return_type(Type::Int)
         .with_callback(

@@ -33,11 +33,11 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new(name: String, arguments: Vec<Type>) -> Function {
+    pub fn new(name: String) -> Function {
         Function {
             name: name, 
             uid: None,
-            arguments: arguments,
+            arguments: Vec::new(),
             return_type: None,
             raw_callback: None
         }

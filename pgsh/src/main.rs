@@ -1,8 +1,14 @@
 extern crate clap;
 extern crate pgs;
 
+#[cfg(feature = "static_std")]
+extern crate pgs_std;
+
 use pgs::{
-    engine::Engine,
+    engine::{
+        Engine,
+        EngineResult
+    },
     api::{
         function::{
             Function,
@@ -33,70 +39,35 @@ use clap::{
     Arg
 };
 
-fn bootstrap_engine(engine: &mut Engine) {
-    let println_function = Function::new(String::from("println"), Vec::new())
-        .with_argument(Type::String)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack(-8)
-                    .map_err(|_| FunctionError::Unknown)?;
-                let string = core.get_mem_string(string_addr)
-                    .map_err(|_| FunctionError::Unknown)?;
-                println!("{}", string);
-                core.push_stack::<i64>(69)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-
-    let print_function = Function::new(String::from("print"), Vec::new())
-        .with_argument(Type::String)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack(-8)
-                    .map_err(|_| FunctionError::Unknown)?;
-                let string = core.get_mem_string(string_addr)
-                    .map_err(|_| FunctionError::Unknown)?;
-                print!("{}", string);
-                core.push_stack::<i64>(69)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-
-    let printi_function = Function::new(String::from("printi"), Vec::new())
-        .with_argument(Type::Int)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let param: i64 = core.get_stack(-8)
-                    .map_err(|_| FunctionError::Unknown)?;
-                print!("{}", param);
-                core.push_stack::<i64>(69)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-    
-    let module = Module::new(String::from("std"))
-        .with_function(println_function)
-        .with_function(print_function)
-        .with_function(printi_function);
-    
-    let reg_res = engine.register_module(module);
-    assert!(reg_res.is_ok());
+fn bootstrap_engine(engine: &mut Engine) -> EngineResult<()> {
+    pgs_std::register_extension(engine)
 }
 
 
 fn build_app<'a>() -> App<'a, 'a> {
+    let mut about_string = "pragmatic_script shell script interpreter";
+    #[cfg(feature = "static_std")]
+    {
+        about_string = "pragmatic_script shell script interpreter\npgs_std statically linked";
+    }
+
     App::new("pgsh")
         .author("Daniel Wanner <daniel.wanner@pm.me>")
-        .about("PragmaticScript shell interpreter")
+        .about(about_string)
         .version("0.1.0")
         .arg(
             Arg::with_name("filename")
                 .index(1)
                 .takes_value(true)
                 .help("Filename of the script to execute")
+        )
+        .arg(
+            Arg::with_name("arguments")
+                .required(false)
+                .takes_value(true)
+                .help("Arguments to pass to the scripts main function")
+                .multiple(true)
+                .last(true)
         )
 }
 
@@ -112,7 +83,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut engine = Engine::new(1024);
 
-    bootstrap_engine(&mut engine);
+    let arguments_opt = app_matches.values_of("arguments");
+    if arguments_opt.is_some() {
+        let arguments: Vec<&str> = arguments_opt.unwrap().collect();
+        for arg in arguments {
+            let int = String::from(arg).parse::<i64>()
+                .map_err(|e| {
+                    println!("ERROR! Only int arguments are supported for now.");
+                    e
+                })?;
+            
+            engine.push_stack(int)?;
+        }
+    }
+
+    #[cfg(feature = "static_std")]
+    bootstrap_engine(&mut engine)?;
 
     engine.run_file(Path::new(filename))?;
 

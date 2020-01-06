@@ -14,14 +14,13 @@ use crate::{
 
 use std::{
     collections::{
-        HashMap,
-        BTreeMap
+        HashMap
     }
 };
 
 pub struct Container {
     pub name: String,
-    pub members: BTreeMap<usize, ContainerMember>,
+    pub members: HashMap<String, ContainerMember>,
     pub functions: HashMap<String, Function>
 }
 
@@ -29,7 +28,7 @@ impl Container {
     pub fn new(name: String) -> Container {
         Container {
             name: name,
-            members: BTreeMap::new(),
+            members: HashMap::new(),
             functions: HashMap::new()
         }
     }

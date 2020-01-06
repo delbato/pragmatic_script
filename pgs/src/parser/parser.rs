@@ -22,6 +22,7 @@ use std::{
         Result as FmtResult
     },
     error::Error,
+    ops::Range
 };
 
 use logos::{
@@ -29,7 +30,7 @@ use logos::{
 };
 
 #[derive(Debug)]
-pub enum ParseError {
+pub enum ParseErrorType {
     Unknown,
     Unimplemented,
     EmptyInput,
@@ -65,6 +66,21 @@ pub enum ParseError {
     ExpectedImportString,
     ExpectedMod,
     ExpectedIf
+}
+
+#[derive(Debug)]
+pub struct ParseError {
+    pub error_type: ParseErrorType,
+    pub token_pos: Range<usize>
+}
+
+impl ParseError {
+    pub fn new(err_type: ParseErrorType, pos: Range<usize>) -> ParseError {
+        ParseError {
+            error_type: err_type,
+            token_pos: pos
+        }
+    }
 }
 
 impl Display for ParseError {
@@ -174,20 +190,20 @@ impl Parser {
 
     pub fn parse_mod_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
         if lexer.token != Token::Mod {
-            return Err(ParseError::ExpectedMod);
+            return Err(ParseError::new(ParseErrorType::ExpectedMod, lexer.range()));
         }
         // Swallow "mod"
         lexer.advance();
 
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
 
         // Swallow ":"
         lexer.advance();
 
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedModName);
+            return Err(ParseError::new(ParseErrorType::ExpectedModName, lexer.range()));
         }
 
         let mod_name = String::from(lexer.slice());
@@ -196,7 +212,7 @@ impl Parser {
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
-            return Err(ParseError::ExpectedOpenBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenBlock, lexer.range()));
         }
 
         // Swallow "{"
@@ -214,7 +230,7 @@ impl Parser {
 
     pub fn parse_import_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
         if lexer.token != Token::Import {
-            return Err(ParseError::ExpectedImport);
+            return Err(ParseError::new(ParseErrorType::ExpectedImport, lexer.range()));
         }
 
         // Swallow "import"
@@ -232,7 +248,7 @@ impl Parser {
 
         while !delims.contains(&lexer.token) {
             if lexer.token != Token::Text {
-                return Err(ParseError::ExpectedImportString);
+                return Err(ParseError::new(ParseErrorType::ExpectedImportString, lexer.range()));
             }
 
             import_string += lexer.slice();
@@ -262,7 +278,7 @@ impl Parser {
             lexer.advance();
 
             if lexer.token != Token::Text {
-                return Err(ParseError::ExpectedImportString);
+                return Err(ParseError::new(ParseErrorType::ExpectedImportString, lexer.range()));
             }
 
             import_as = String::from(lexer.slice());
@@ -271,7 +287,7 @@ impl Parser {
         }
 
         if lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
         }
 
         // Swallow ";"
@@ -287,26 +303,26 @@ impl Parser {
 
         // Parse "fn" literal
         if lexer.token != Token::Fn {
-            return Err(ParseError::FnMissing);
+            return Err(ParseError::new(ParseErrorType::FnMissing, lexer.range()));
         }
         lexer.advance();
 
         // Parse ":"
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
         lexer.advance();
 
         // Parse function name
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedFunctionName);
+            return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
         }
         let fn_name = String::from(lexer.slice());
         lexer.advance();
 
         // Parse "("
         if lexer.token != Token::OpenParan {
-            return Err(ParseError::OpenParanMissing);
+            return Err(ParseError::new(ParseErrorType::OpenParanMissing, lexer.range()));
         }
         lexer.advance();
 
@@ -314,12 +330,12 @@ impl Parser {
         let fn_args = self.parse_fn_args(lexer)?;
 
         if lexer.token != Token::CloseParan {
-            return Err(ParseError::CloseParanMissing);
+            return Err(ParseError::new(ParseErrorType::CloseParanMissing, lexer.range()));
         }
         lexer.advance();
 
         if lexer.token != Token::Tilde {
-            return Err(ParseError::ReturnTypeMissing);
+            return Err(ParseError::new(ParseErrorType::ReturnTypeMissing, lexer.range()));
         }
         lexer.advance();
 
@@ -343,7 +359,7 @@ impl Parser {
                 Type::Other(type_name)
             },
             _ => {
-                return Err(ParseError::UnknownType);
+                return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
             }
         };
 
@@ -361,12 +377,12 @@ impl Parser {
                 code_block_opt = Some(statements);
             },
             _ => {
-                return Err(ParseError::ExpectedBlockOrSemicolon);
+                return Err(ParseError::new(ParseErrorType::ExpectedBlockOrSemicolon, lexer.range()));
             }
         };
 
         if lexer.token != Token::CloseBlock && lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedBlockOrSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedBlockOrSemicolon, lexer.range()));
         }
 
         // Swallow "}"|";"
@@ -383,7 +399,7 @@ impl Parser {
             Declaration::Function(fn_raw)
         );
 
-        fn_decl_opt.ok_or(ParseError::Unknown)
+        fn_decl_opt.ok_or(ParseError::new(ParseErrorType::Unknown, lexer.range()))
     }
 
     pub fn parse_fn_args(&self, lexer: &mut Lexer) -> ParseResult<BTreeMap<usize, (String, Type)>> {
@@ -401,7 +417,7 @@ impl Parser {
             }
             let fn_arg = fn_arg_res.unwrap();
             if fn_arg_set.contains(&fn_arg.0) {
-                return Err(ParseError::DuplicateArg);
+                return Err(ParseError::new(ParseErrorType::DuplicateArg, lexer.range()));
             }
             fn_arg_set.insert(fn_arg.0.clone());
 
@@ -423,14 +439,14 @@ impl Parser {
     pub fn parse_fn_arg(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
         let mut lexer_backup = lexer.clone();
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedArgName);
+            return Err(ParseError::new(ParseErrorType::ExpectedArgName, lexer.range()));
         }
         let arg_name = String::from(lexer.slice());
         lexer.advance();
 
         // Parse ":"
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
         lexer.advance();
 
@@ -441,7 +457,7 @@ impl Parser {
             Token::String => Type::String,
             _ => {
                 *lexer = lexer_backup;
-                return Err(ParseError::ExpectedArgType);
+                return Err(ParseError::new(ParseErrorType::ExpectedArgType, lexer.range()));
             }
         };
 
@@ -452,21 +468,21 @@ impl Parser {
 
     pub fn parse_container_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
         if lexer.token != Token::Container {
-            return Err(ParseError::Unknown);
+            return Err(ParseError::new(ParseErrorType::Unknown, lexer.range()));
         }
 
         // Swallow "cont"
         lexer.advance();
 
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
 
         // Swallow ":"
         lexer.advance();
 
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedStructName);
+            return Err(ParseError::new(ParseErrorType::ExpectedStructName, lexer.range()));
         }
 
         let container_name = String::from(lexer.slice());
@@ -475,7 +491,7 @@ impl Parser {
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
-            return Err(ParseError::ExpectedOpenBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenBlock, lexer.range()));
         }
 
         // Swallow "{"
@@ -506,7 +522,7 @@ impl Parser {
             
             let member = self.parse_container_member(lexer)?;
             if members.contains(&member.0) {
-                return Err(ParseError::DuplicateMember);
+                return Err(ParseError::new(ParseErrorType::DuplicateMember, lexer.range()));
             }
             members.insert(member.0.clone());
             ret.insert(member_index, member);
@@ -518,7 +534,7 @@ impl Parser {
 
     pub fn parse_container_member(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedMemberName);
+            return Err(ParseError::new(ParseErrorType::ExpectedMemberName, lexer.range()));
         }
 
         let mut member_name = String::from(lexer.slice());
@@ -532,7 +548,7 @@ impl Parser {
         }
 
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
 
         // Swallow ":"
@@ -557,14 +573,14 @@ impl Parser {
                 }
                 Type::Other(type_name)
             },
-            _ => return Err(ParseError::ExpectedMemberType)
+            _ => return Err(ParseError::new(ParseErrorType::ExpectedMemberType, lexer.range()))
         };
 
         // Swallow member type
         lexer.advance();
 
         if lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
         }
 
         // Swallow ";"
@@ -577,14 +593,14 @@ impl Parser {
 
     pub fn parse_loop(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::Loop {
-            return Err(ParseError::ExpectedLoop);
+            return Err(ParseError::new(ParseErrorType::ExpectedLoop, lexer.range()));
         }
 
         // Swallow "loop"
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
-            return Err(ParseError::ExpectedOpenBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenBlock, lexer.range()));
         }
 
         // Swallow "{"
@@ -593,7 +609,7 @@ impl Parser {
         let stmt_list = self.parse_statement_list(lexer)?;
 
         if lexer.token != Token::CloseBlock {
-            return Err(ParseError::ExpectedCloseBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedCloseBlock, lexer.range()));
         }
 
         // Swallow "}"
@@ -606,7 +622,7 @@ impl Parser {
 
     pub fn parse_while(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::While {
-            return Err(ParseError::ExpectedWhile);
+            return Err(ParseError::new(ParseErrorType::ExpectedWhile, lexer.range()));
         }
 
         // Swallow "while"
@@ -626,7 +642,7 @@ impl Parser {
         }
 
         if lexer.token != Token::OpenBlock {
-            return Err(ParseError::ExpectedOpenBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenBlock, lexer.range()));
         }
 
         // Swallow "{"
@@ -644,7 +660,7 @@ impl Parser {
 
     pub fn parse_if(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::If {
-            return Err(ParseError::ExpectedIf);
+            return Err(ParseError::new(ParseErrorType::ExpectedIf, lexer.range()));
         }
         // Swallow "if"
         lexer.advance();
@@ -655,7 +671,7 @@ impl Parser {
         ])?;
 
         if lexer.token != Token::OpenBlock {
-            return Err(ParseError::ExpectedOpenBlock);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenBlock, lexer.range()));
         }
 
         // Swallow "{"
@@ -703,7 +719,7 @@ impl Parser {
                     ret.push(self.parse_loop(lexer)?);
                 },
                 _ => {
-                    return Err(ParseError::UnknownStatement);
+                    return Err(ParseError::new(ParseErrorType::UnknownStatement, lexer.range()));
                 }
             };
             
@@ -714,14 +730,14 @@ impl Parser {
 
     pub fn parse_break(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::Break {
-            return Err(ParseError::UnknownStatement);
+            return Err(ParseError::new(ParseErrorType::UnknownStatement, lexer.range()));
         }
 
         // Swallow "break"
         lexer.advance();
 
         if lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
         }
 
         // Swallow ";"
@@ -734,14 +750,14 @@ impl Parser {
 
     pub fn parse_continue(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::Continue {
-            return Err(ParseError::UnknownStatement);
+            return Err(ParseError::new(ParseErrorType::UnknownStatement, lexer.range()));
         }
 
         // Swallow "continue"
         lexer.advance();
 
         if lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
         }
 
         // Swallow ";"
@@ -774,7 +790,7 @@ impl Parser {
         
         if lexer.token != Token::Text {
             *lexer = lexer_backup;
-            return Err(ParseError::ExpectedVarName);
+            return Err(ParseError::new(ParseErrorType::ExpectedVarName, lexer.range()));
         }
 
         let mut var_name = String::from(lexer.slice());
@@ -789,7 +805,7 @@ impl Parser {
 
         // Parse ":"
         if lexer.token != Token::Colon {
-            return Err(ParseError::ExpectedColon);
+            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
         }
         lexer.advance();
 
@@ -813,7 +829,7 @@ impl Parser {
                 Type::Other(type_name)
             },
             _ => {
-                return Err(ParseError::UnknownType);
+                return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
             }
         };
 
@@ -821,7 +837,7 @@ impl Parser {
 
         if lexer.token != Token::Assign {
             *lexer = lexer_backup;
-            return Err(ParseError::ExpectedAssignment);
+            return Err(ParseError::new(ParseErrorType::ExpectedAssignment, lexer.range()));
         }
 
         lexer.advance();
@@ -845,14 +861,14 @@ impl Parser {
 
     pub fn parse_var_assign(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::Text {
-            return Err(ParseError::UnknownStatement);
+            return Err(ParseError::new(ParseErrorType::UnknownStatement, lexer.range()));
         }
 
         let var_name = String::from(lexer.slice());
         lexer.advance();
 
         if lexer.token != Token::Assign {
-            return Err(ParseError::ExpectedAssignment);
+            return Err(ParseError::new(ParseErrorType::ExpectedAssignment, lexer.range()));
         }
 
         lexer.advance();
@@ -868,7 +884,7 @@ impl Parser {
 
     pub fn parse_fn_call_stmt(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedFunctionName);
+            return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
         }
 
         let fn_name = String::from(lexer.slice());
@@ -876,7 +892,7 @@ impl Parser {
         lexer.advance();
 
         if lexer.token != Token::OpenParan {
-            return Err(ParseError::ExpectedOpenParan);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenParan, lexer.range()));
         }
 
         // Swallow "("
@@ -901,7 +917,7 @@ impl Parser {
         lexer.advance();
 
         if lexer.token != Token::Semicolon {
-            return Err(ParseError::ExpectedSemicolon);
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
         }
         // Swallow ";"
         lexer.advance();
@@ -911,7 +927,7 @@ impl Parser {
         )
     }
 
-    pub fn parse_expr_push(&self, operand_stack: &mut VecDeque<Expression>, operator_stack: &mut VecDeque<Token>) -> ParseResult<Expression> {
+    pub fn parse_expr_push(&self, lexer: &mut Lexer, operand_stack: &mut VecDeque<Expression>, operator_stack: &mut VecDeque<Token>) -> ParseResult<Expression> {
         //println!("parse_expr_push(): operator stack len {}", operator_stack.len());
         //println!("parse_expr_push(): operand stack len {}", operand_stack.len());
         let op = operator_stack.pop_front().unwrap();
@@ -972,7 +988,7 @@ impl Parser {
                 Expression::Not(Box::new(op))
             },
             _ => {
-                return Err(ParseError::UnsupportedExpression);
+                return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
             }
         };
         Ok(expr)
@@ -982,14 +998,14 @@ impl Parser {
         let lexer_backup = lexer.clone(); // Create lexer backup for backtracking
 
         if lexer.token != Token::Text {
-            return Err(ParseError::ExpectedFunctionName);
+            return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
         }
         
         let mut full_fn_name = String::new();
 
         loop {
             if lexer.token != Token::Text {
-                return Err(ParseError::ExpectedFunctionName);
+                return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
             }
 
             full_fn_name += lexer.slice();
@@ -1008,12 +1024,12 @@ impl Parser {
         }
 
         if full_fn_name.is_empty() {
-            return Err(ParseError::ExpectedFunctionName);
+            return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
         }
 
         if lexer.token != Token::OpenParan {
             *lexer = lexer_backup;
-            return Err(ParseError::ExpectedOpenParan);
+            return Err(ParseError::new(ParseErrorType::ExpectedOpenParan, lexer.range()));
         }
 
         // Swallow "("
@@ -1099,7 +1115,7 @@ impl Parser {
 
             if lexer.token == Token::IntLiteral {
                 let int = String::from(lexer.slice()).parse::<i64>()
-                    .map_err(|_| ParseError::Unknown)?;
+                    .map_err(|_| ParseError::new(ParseErrorType::Unknown, lexer.range()))?;
                 let expr = Expression::IntLiteral(int);
                 operand_stack.push_front(expr);
             }
@@ -1126,7 +1142,7 @@ impl Parser {
                         break; // Break if there is no operator of greater precedence on the stack or of equal precedence and right assoc
                     }
 
-                    let expr = self.parse_expr_push(&mut operand_stack, &mut operator_stack)?;
+                    let expr = self.parse_expr_push(lexer, &mut operand_stack, &mut operator_stack)?;
                     operand_stack.push_front(expr);
                 }
                 operator_stack.push_front(lexer.token.clone());
@@ -1148,7 +1164,7 @@ impl Parser {
                             break;
                         }
                     }
-                    let expr = self.parse_expr_push(&mut operand_stack, &mut operator_stack)?;
+                    let expr = self.parse_expr_push(lexer, &mut operand_stack, &mut operator_stack)?;
                     operand_stack.push_front(expr);
                 }
 
@@ -1177,11 +1193,11 @@ impl Parser {
         }
 
         while operator_stack.len() > 0 {
-            let expr = self.parse_expr_push(&mut operand_stack, &mut operator_stack)?;
+            let expr = self.parse_expr_push(lexer, &mut operand_stack, &mut operator_stack)?;
             operand_stack.push_front(expr);
         }
 
         operand_stack.pop_front()
-            .ok_or(ParseError::UnsupportedExpression)
+            .ok_or(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()))
     }
 }

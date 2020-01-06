@@ -272,6 +272,11 @@ impl Core {
                     let lhs: i64 = self.pop_stack()?;
                     self.push_stack(lhs < rhs)?;
                 },
+                Opcode::LTEQI => {
+                    let rhs: i64 = self.pop_stack()?;
+                    let lhs: i64 = self.pop_stack()?;
+                    self.push_stack(lhs <= rhs)?;
+                },
                 Opcode::SDUPA => {
                     let op_offset: i64 = self.get_op()?;
                     //println!("SDUPA offset: {}", op_offset);
