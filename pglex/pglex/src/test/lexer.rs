@@ -6,6 +6,7 @@ use crate::{
 
 use regex::Regex;
 use derive::TokenType;
+use lazy_static::lazy_static;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum Token {

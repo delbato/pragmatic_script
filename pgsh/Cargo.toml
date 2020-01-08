@@ -9,8 +9,8 @@ license = "BSD-3-Clause"
 
 [dependencies]
 clap = "2.33.0"
-pgs = { path = "../pgs" }
-pgs-std = { path = "../pgs-std", optional = true }
+pgs = { path = "../pgs/pgs" }
+pgs-std = { path = "../pgs/pgs-std", optional = true }
 
 [features]
 static_std = [ "pgs-std" ]
