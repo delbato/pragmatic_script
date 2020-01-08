@@ -375,9 +375,9 @@ fn test_compile_expr_call() {
         let ret_instr = Instruction::new(Opcode::RET);
 
         comp_builder.push_instr(pushi_instr);
-        comp_builder.push_instr(svswp_instr);
-        comp_builder.push_instr(popn_instr);
-        comp_builder.push_instr(ldswp_instr);
+        //comp_builder.push_instr(svswp_instr);
+        //comp_builder.push_instr(popn_instr);
+        //comp_builder.push_instr(ldswp_instr);
         comp_builder.push_instr(ret_instr);
     }
     // main()
@@ -412,7 +412,7 @@ fn test_compile_expr_call() {
 
     let comp_code = comp_builder.build();
     let mut fn_map = HashMap::new();
-    fn_map.insert(main_uid, 21);
+    fn_map.insert(main_uid, 10);
     fn_map.insert(five_uid, 0);
     let comp_prog = Program::new()
         .with_code(comp_code)
@@ -470,9 +470,9 @@ fn test_compile_expr_call_mod() {
         let ret_instr = Instruction::new(Opcode::RET);
 
         comp_builder.push_instr(pushi_instr);
-        comp_builder.push_instr(svswp_instr);
-        comp_builder.push_instr(popn_instr);
-        comp_builder.push_instr(ldswp_instr);
+        //comp_builder.push_instr(svswp_instr);
+        //comp_builder.push_instr(popn_instr);
+        //comp_builder.push_instr(ldswp_instr);
         comp_builder.push_instr(ret_instr);
     }
     // main()
@@ -507,7 +507,7 @@ fn test_compile_expr_call_mod() {
 
     let comp_code = comp_builder.build();
     let mut fn_map = HashMap::new();
-    fn_map.insert(main_uid, 21);
+    fn_map.insert(main_uid, 10);
     fn_map.insert(five_uid, 0);
     let comp_prog = Program::new()
         .with_code(comp_code)

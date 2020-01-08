@@ -8,7 +8,7 @@ use std::{
 #[derive(PartialEq, Debug, Clone)]
 pub enum Expression {
     IntLiteral(i64),
-    FloatLiteral(f64),
+    FloatLiteral(f32),
     StringLiteral(String),
     BoolLiteral(bool),
     Variable(String),

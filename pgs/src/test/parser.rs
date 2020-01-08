@@ -159,6 +159,38 @@ fn test_parse_stmt_addition() {
 }
 
 #[test]
+fn test_parse_stmt_call() {
+    let code = String::from("
+        std::alloc::allocate();
+    ");
+
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+    let stmt_list_res = parser.parse_statement_list(&mut lexer);
+
+    assert!(stmt_list_res.is_ok());
+    let stmt_list = stmt_list_res.unwrap();
+
+    assert_eq!(stmt_list.len(), 1);
+
+    println!("{:?}", stmt_list);
+}
+
+#[test]
+fn test_parse_float_expr() {
+    let code = String::from("
+        (2.0 * 2.0) * 3.14;
+    ");
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+
+    let expr_res = parser.parse_expr(&mut lexer, &[Token::Semicolon]);
+    assert!(expr_res.is_ok());
+    let expr = expr_res.unwrap();
+    expr.print(0);
+}
+
+#[test]
 fn test_parse_raw_expr() {
     let code = String::from("
         (1 + 2 + 3) * 7 - 8 + 3;

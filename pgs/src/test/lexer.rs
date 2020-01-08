@@ -54,3 +54,29 @@ fn test_lex_function_decl() {
 
     assert_eq!(lexer.token, Token::CloseBlock);
 }
+
+#[test]
+fn test_lex_weird_mod_name() {
+    let code = "root::some::other::module::function";
+
+    let mut lexer = Token::lexer(code);
+
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::DoubleColon);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::DoubleColon);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::DoubleColon);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::DoubleColon);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+}

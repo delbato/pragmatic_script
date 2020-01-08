@@ -3,7 +3,9 @@ members = [
     "pgs",
     "pgsh",
     "pgs-std",
-    "pgs-derive"
+    "pgs-derive",
+    "pglex/pglex",
+    "pglex/pglex-derive"
 ]
 
 [profile.release]

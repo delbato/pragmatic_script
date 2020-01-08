@@ -698,7 +698,12 @@ impl Parser {
                     ret.push(self.parse_var_decl(lexer)?);
                 },
                 Token::Text => {
-                    ret.push(self.parse_var_assign(lexer)?);
+                    let call_res = self.try_parse_call_stmt(lexer);
+                    if call_res.is_err() {
+                        ret.push(self.parse_var_assign(lexer)?);
+                        continue;
+                    }
+                    ret.push(call_res.unwrap());
                 },
                 Token::Return => {
                     ret.push(self.parse_return(lexer)?);
@@ -726,6 +731,85 @@ impl Parser {
         }
 
         Ok(ret)
+    }
+
+    pub fn try_parse_call_stmt(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
+        let delims = [
+            Token::Semicolon,
+            Token::End,
+            Token::Error
+        ];
+
+        let lexer_backup = lexer.clone();
+
+        let mut full_fn_name = String::new();
+        let mut last_bit = String::new();
+
+        while !delims.contains(&lexer.token) {
+            if lexer.token != Token::Text {
+                break;
+            }
+            full_fn_name += lexer.slice();
+            last_bit = String::from(lexer.slice());
+            lexer.advance();
+            if last_bit.len() == 1 && lexer.token == Token::Text {
+                full_fn_name += lexer.slice();
+                last_bit += lexer.slice();
+                lexer.advance();
+            }
+            if lexer.token != Token::DoubleColon {
+                break;
+            }
+            full_fn_name += lexer.slice();
+            last_bit = String::from(lexer.slice());
+            lexer.advance();
+        }
+
+        if &last_bit == "::" {
+            *lexer = lexer_backup;
+            return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
+        }
+
+        if lexer.token != Token::OpenParan {
+            *lexer = lexer_backup;
+            return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
+        }
+
+        lexer.advance();
+
+        let mut params = Vec::new();
+
+        while lexer.token != Token::CloseParan &&
+            lexer.token != Token::End &&
+            lexer.token != Token::Error {
+            let arg_res = self.parse_expr(lexer, &[
+                Token::Comma,
+                Token::CloseParan
+            ]);
+            if arg_res.is_err() {
+                *lexer = lexer_backup;
+                return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
+            }
+            if lexer.token == Token::Comma {
+                lexer.advance(); // Swallow "," if its there
+            }
+            params.push(arg_res.unwrap());
+        }
+
+        // Swallow ")"
+        lexer.advance();
+
+        if lexer.token != Token::Semicolon {
+            *lexer = lexer_backup;
+            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
+        }
+
+        // Swallow ";"
+        lexer.advance();
+
+        Ok(
+            Statement::Call(full_fn_name, params)
+        )
     }
 
     pub fn parse_break(&self, lexer: &mut Lexer) -> ParseResult<Statement> {
@@ -1117,6 +1201,13 @@ impl Parser {
                 let int = String::from(lexer.slice()).parse::<i64>()
                     .map_err(|_| ParseError::new(ParseErrorType::Unknown, lexer.range()))?;
                 let expr = Expression::IntLiteral(int);
+                operand_stack.push_front(expr);
+            }
+
+            if lexer.token == Token::FloatLiteral {
+                let float = String::from(lexer.slice()).parse::<f32>()
+                    .map_err(|_| ParseError::new(ParseErrorType::Unknown, lexer.range()))?;
+                let expr = Expression::FloatLiteral(float);
                 operand_stack.push_front(expr);
             }
 
