@@ -12,7 +12,7 @@ use std::{
     }
 };
 
-pub trait TokenType: Sized + Clone + Eq + Hash {
+pub trait Lexable: Sized + Clone + Eq + Hash {
     fn lexer<'source, S: Source<'source>>(source: S) -> Lexer<Self, S>;
     fn match_token(slice: &str) -> Vec<Self>;
     fn get_end_variant() -> Self;

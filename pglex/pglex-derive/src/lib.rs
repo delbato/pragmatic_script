@@ -14,8 +14,8 @@ use syn::{
 };
 use quote::quote;
 
-#[proc_macro_derive(TokenType, attributes(end, error, token, regex, skip))]
-pub fn derive_token_type(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Lexable, attributes(end, error, token, regex, skip))]
+pub fn derive_lexable(input: TokenStream) -> TokenStream {
     let item: ItemEnum = syn::parse(input).expect("Only Enums can be used as a TokenType.");
 
     let enum_size = item.variants.len();
@@ -130,7 +130,7 @@ pub fn derive_token_type(input: TokenStream) -> TokenStream {
     }
 
     let token_stream = quote! {
-        impl TokenType for #name {
+        impl Lexable for #name {
             fn lexer<'source, S>(source: S) -> Lexer<#name, S>
             where S: Source<'source> {
                 let mut ret = Lexer::new(source);

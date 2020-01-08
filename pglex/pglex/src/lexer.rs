@@ -2,8 +2,8 @@ use crate::{
     source::{
         Source
     },
-    token::{
-        TokenType
+    lexable::{
+        Lexable
     }
 };
 
@@ -29,7 +29,7 @@ pub struct Lexer<T, S> {
 }
 
 impl<'source, T, S> Lexer<T, S> 
-    where T: TokenType, S: Source<'source> {
+    where T: Lexable, S: Source<'source> {
 
     pub fn new(source: S) -> Self {
         let len = source.len();

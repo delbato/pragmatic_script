@@ -1,11 +1,11 @@
 use crate::{
-    token::TokenType,
+    lexable::Lexable,
     lexer::Lexer,
     source::Source
 };
 
 use regex::Regex;
-use derive::TokenType;
+use derive::Lexable;
 use lazy_static::lazy_static;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -23,7 +23,7 @@ enum Token {
     Error
 }
 
-#[derive(TokenType, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Lexable, Clone, PartialEq, Eq, Debug, Hash)]
 enum DerivedToken {
     #[token = "float"]
     Float,
@@ -38,7 +38,7 @@ enum DerivedToken {
     Error
 }
 
-impl TokenType for Token {
+impl Lexable for Token {
     fn lexer<'source, S>(source: S) -> Lexer<Token, S>
         where S: Source<'source> {
         let mut ret = Lexer::new(source);
