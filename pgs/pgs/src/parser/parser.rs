@@ -4,7 +4,7 @@ use super::{
     },
     lexer::{
         Token,
-        Lexer
+        PgLexer as Lexer
     }
 };
 
@@ -25,9 +25,7 @@ use std::{
     ops::Range
 };
 
-use logos::{
-    Logos
-};
+use pglex::prelude::Lexable;
 
 #[derive(Debug)]
 pub enum ParseErrorType {
@@ -165,19 +163,23 @@ impl Parser {
         while !delims.contains(&lexer.token) &&
             lexer.token != Token::End &&
             lexer.token != Token::Error {
-            if lexer.token == Token::Fn {
-                ret.push(self.parse_fn_decl(lexer)?);
-            }
-            if lexer.token == Token::Container {
-                ret.push(self.parse_container_decl(lexer)?);
-            }
-            if lexer.token == Token::Import {
-                ret.push(self.parse_import_decl(lexer)?);
-            }
-            if lexer.token == Token::Mod {
-                ret.push(self.parse_mod_decl(lexer)?);
-            }
-            //lexer.advance();
+            match lexer.token {
+                Token::Fn => {
+                    ret.push(self.parse_fn_decl(lexer)?);
+                },
+                Token::Container => {
+                    ret.push(self.parse_container_decl(lexer)?);
+                },
+                Token::Import => {
+                    ret.push(self.parse_import_decl(lexer)?);
+                },
+                Token::Mod => {
+                    ret.push(self.parse_mod_decl(lexer)?);
+                },
+                _ => {
+                    return Err(ParseError::new(ParseErrorType::ExpectedMod, lexer.range()));
+                }
+            };
         }
 
         Ok(ret)

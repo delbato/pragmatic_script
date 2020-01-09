@@ -3,10 +3,11 @@ use crate::{
         lexer::Token
     }
 };
-use logos::Logos;
+use pglex::prelude::Lexable;
 
 #[test]
 fn test_lex_comment() {
+    let i = 0;
     let lexer = Token::lexer("
         // This is a comment
         /*

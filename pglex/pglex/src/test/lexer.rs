@@ -8,94 +8,62 @@ use regex::Regex;
 use derive::Lexable;
 use lazy_static::lazy_static;
 
-#[derive(Clone, PartialEq, Debug, Eq, Hash)]
+#[derive(Lexable, Clone, Debug, Hash, PartialEq, Eq)]
 enum Token {
-    Int,
-    Float,
-    Bool,
-    Mod,
-    IntLiteral,
-    FloatLiteral,
-    Text,
-    Colon,
-    DoubleColon,
-    End,
-    Error
-}
+    #[token = "fn"]
+    #[prio = 1]
+    Fn,
 
-#[derive(Lexable, Clone, PartialEq, Eq, Debug, Hash)]
-enum DerivedToken {
+    #[token = "int"]
+    Int,
+
     #[token = "float"]
     Float,
+
+    #[token = "bool"]
+    Bool,
+
+    #[token = "mod"]
+    Mod,
+
+    #[token = "/"]
+    Divide,
+
     #[regex = "[0-9]+"]
     IntLiteral,
-    #[token = "skip"]
+
+    #[regex = r"[0-9]+\.[0-9]*"]
+    FloatLiteral,
+
+    #[regex = "[a-zA-Z][a-zA-Z0-9]*"]
+    Text,
+
+    #[token = ":"]
+    Colon,
+
+    #[token = "::"]
+    DoubleColon,
+
+    #[token_start = "//"]
+    #[token_end = "\n"]
     #[skip]
-    Skip,
+    SingleLineComment,
+
+    #[token_start = "#"]
+    #[token_end = "\n"]
+    #[skip]
+    HashLineComment,
+
+    #[token_start = "/*"]
+    #[token_end = "*/"]
+    #[skip]
+    MultiLineComment,
+
     #[end]
     End,
+
     #[error]
     Error
-}
-
-impl Lexable for Token {
-    fn lexer<'source, S>(source: S) -> Lexer<Token, S>
-        where S: Source<'source> {
-        let mut ret = Lexer::new(source);
-        ret.advance();
-        ret
-    }
-
-    fn match_token(slice: &str) -> Vec<Token> {
-        let mut matches = Vec::new();
-        lazy_static! {
-            static ref int_regex: Regex = Regex::new(r"^\d+$").unwrap();
-            static ref float_regex: Regex = Regex::new(r"^[0-9]+\.[0-9]+$").unwrap();
-            static ref text_regex: Regex = Regex::new(r"^[a-zA-Z][a-zA-Z0-9]*$").unwrap();
-        }
-
-        if "int" == slice {
-            matches.push(Token::Int);
-        }
-        if "float" == slice {
-            matches.push(Token::Float);
-        }
-        if "bool" == slice {
-            matches.push(Token::Bool);
-        }
-        if "mod" == slice {
-            matches.push(Token::Mod);
-        }
-        if "::" == slice {
-            matches.push(Token::DoubleColon);
-        }
-        if ":" == slice {
-            matches.push(Token::Colon);
-        }
-        if int_regex.is_match(slice) {
-            matches.push(Token::IntLiteral);
-        }
-        if float_regex.is_match(slice) {
-            matches.push(Token::FloatLiteral);
-        }
-        if text_regex.is_match(slice) {
-            matches.push(Token::Text);
-        }
-
-        matches
-    } 
-
-    fn get_end_variant() -> Token {
-        Token::End
-    }
-    
-    fn get_error_variant() -> Token {
-        Token::Error
-    }
-
-    fn should_skip(&self) -> bool {
-        false
-    }
 }
 
 #[test]
@@ -245,14 +213,29 @@ fn test_lexer_import_string() {
     lexer.advance();
     assert_eq!(lexer.token, Token::Text);
     assert_eq!(lexer.slice(), "function");
-
 }
 
 #[test]
-fn test_lexer_derived_basic() {
-    let code = "1234 float";
-    let mut lexer = DerivedToken::lexer(code);
+fn test_lexer_comments() {
+    let code = "
+        # Hash line comment
+        // Single line comment
+        /* multiline comment */
+        float
+    ";
 
-    assert_eq!(lexer.token, DerivedToken::IntLiteral);
-    assert_eq!(lexer.slice(), "1234");
+    use regex::Regex;
+    let regex = Regex::new(r"//.*\n").unwrap();
+    assert!(regex.is_match("// This is a single line comment\n"));
+
+    let mut lexer = Token::lexer(code);
+    assert_eq!(lexer.token, Token::Float);
+}
+
+#[test]
+fn test_lexer_fn() {
+    let code = "fn: main";
+
+    let mut lexer = Token::lexer(code);
+    assert_eq!(lexer.token, Token::Fn);
 }

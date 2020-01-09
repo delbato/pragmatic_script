@@ -9,10 +9,12 @@ license = "BSD-3-Clause"
 
 [dependencies]
 logos = "0.10.0-rc2"
-serde = "1.0.103"
+serde = "1.0.104"
 byteorder = "1.3.2"
-bincode = "1.2.0"
+bincode = "1.2.1"
 memoffset = "0.5.3"
 rand = "0.7.2"
 enum-primitive-derive = "0.1.2"
 num-traits = "0.2.10"
+
+pglex = { path = "../../pglex/pglex" }

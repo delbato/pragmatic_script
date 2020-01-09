@@ -6,71 +6,93 @@ use std::{
     }
 };
 
-use logos::{
-    Logos,
-    Lexer as LogosLexer,
-    Source
+use pglex::{
+    prelude::{
+        Lexable,
+        Lexer,
+        Regex,
+        Source
+    },
+    lazy_static::lazy_static
 };
 
-pub type Lexer<'s> = LogosLexer<Token, &'s str>;
+pub type PgLexer<'source> = Lexer<Token, &'source str>;
 
-#[derive(Logos, Debug, PartialEq, Clone)]
+#[derive(Lexable, Hash, Eq, Debug, PartialEq, Clone)]
 pub enum Token {
     #[token = "fn"]
+    #[prio = 1]
     Fn,
 
     #[token = "cont"]
+    #[prio = 1]
     Container,
 
     #[token = "var"]
+    #[prio = 1]
     Var,
 
     #[token = "mod"]
+    #[prio = 1]
     Mod,
 
     #[token = "import"]
+    #[prio = 1]
     Import,
 
     #[token = "int"]
+    #[prio = 1]
     Int,
 
     #[token = "float"]
+    #[prio = 1]
     Float,
 
     #[token = "string"]
+    #[prio = 1]
     String,
 
     #[token = "for"]
+    #[prio = 1]
     For,
 
     #[token = "loop"]
+    #[prio = 1]
     Loop,
 
     #[token = "while"]
+    #[prio = 1]
     While,
 
     #[token = "bool"]
+    #[prio = 1]
     Bool,
 
     #[token = "true"]
+    #[prio = 1]
     True,
 
     #[token = "false"]
+    #[prio = 1]
     False,
 
     #[token = "if"]
+    #[prio = 1]
     If,
 
     #[token = "!"]
     Not,
 
     #[token = "else"]
+    #[prio = 1]
     Else,
 
     #[token = "break"]
+    #[prio = 1]
     Break,
 
     #[token = "continue"]
+    #[prio = 1]
     Continue,
 
     #[regex = "([a-zA-Z_][a-zA-Z0-9_]*)"]
@@ -146,66 +168,27 @@ pub enum Token {
     Tilde,
 
     #[token = "return"]
+    #[prio = 1]
     Return,
-
-    //#[regex = "//[.]*\n"]
-    //#[regex = "#[.]*\n"]
-    //#[regex = "/**[.]*/"]
-    //#[callback = "ignore_comments"]
 
     #[end]
     End,
 
-    #[regex = "//[^\n]*"]
-    #[regex = "#[^\n]*"]
-    #[token = "/*"]
-    #[callback = "ignore_comments"]
-    Comment,
+    #[token_start = "//"]
+    #[token_end = "\n"]
+    #[skip]
+    SingleLineComment,
+
+    #[token_start = "#"]
+    #[token_end = "\n"]
+    #[skip]
+    HashLineComment,
+
+    #[token_start = "/*"]
+    #[token_end = "*/"]
+    #[skip]
+    MultiLineComment,
 
     #[error]
     Error
-}
-
-
-/// # Skips producing Comment Tokens
-/// 
-/// Required as a workaround for Logos, which is sort of broken rn anyway.  
-/// Consider forking.
-pub fn ignore_comments<'source, Src: Source<'source>>(lexer: &mut LogosLexer<Token, Src>) {
-    use logos::internal::LexerInternal;
-    use logos::Slice;
-    // If this fits the "multiline comment" token
-    if lexer.slice().as_bytes() == b"/*" {
-        // Loop until end of string or end of comment, skipping any content
-        loop {
-            // Read byte val at current position
-            let read_opt = lexer.read();
-            // If read errors, produce an error token
-            if read_opt.is_none() {
-                return lexer.token = Token::Error;
-            }
-            // Get value
-            let val = read_opt.unwrap();
-            match val {
-                // If its zero for some reason
-                0 => return lexer.token = Token::Error,
-                // If current char is a "*"
-                b'*' => {
-                    // And the immediately next one is a "/", meaning the comment end with "*/"
-                    if lexer.read_at(1) == Some(b'/') {
-                        // Bump the lexer up by two char positions, effectively skipping the comment
-                        lexer.bump(2);
-                        break;
-                    } else {
-                        // Otherwise only skip this sole "*"
-                        lexer.bump(1);
-                    }
-                },
-                // Skip any and all characters
-                _ => lexer.bump(1),
-            }
-        }
-    }
-    // Finally, produce the next token after the comment
-    lexer.advance();
 }

@@ -14,7 +14,7 @@ use syn::{
 };
 use quote::quote;
 
-#[proc_macro_derive(Lexable, attributes(end, error, token, regex, skip))]
+#[proc_macro_derive(Lexable, attributes(end, error, token, regex, token_start, token_end, skip, prio))]
 pub fn derive_lexable(input: TokenStream) -> TokenStream {
     let item: ItemEnum = syn::parse(input).expect("Only Enums can be used as a TokenType.");
 
@@ -24,12 +24,17 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
     let mut match_statements: Vec<TokenStream2> = Vec::new();
     let mut skip_statements: Vec<TokenStream2> = Vec::new();
     let mut regex_init_statements: Vec<TokenStream2> = Vec::new();
+    let mut inclusive_statements: Vec<TokenStream2> = Vec::new();
+    let mut prio_statements: Vec<TokenStream2> = Vec::new();
 
     let token_attr_ident = syn::parse_str::<Ident>("token").unwrap();
     let regex_attr_ident = syn::parse_str::<Ident>("regex").unwrap();
     let skip_attr_ident = syn::parse_str::<Ident>("skip").unwrap();
     let error_attr_ident = syn::parse_str::<Ident>("error").unwrap();
     let end_attr_ident = syn::parse_str::<Ident>("end").unwrap();
+    let token_start_ident = syn::parse_str::<Ident>("token_start").unwrap();
+    let token_end_ident = syn::parse_str::<Ident>("token_end").unwrap();
+    let prio_ident = syn::parse_str::<Ident>("prio").unwrap();
 
     let mut end_set = false;
     let mut error_set = false;
@@ -48,6 +53,9 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
             Fields::Unit => {},
             _ => panic!("`{}::{}` has fields, this is not allowed for a TokenType.", name, variant.ident),
         }
+
+        let mut token_end_val = String::new();
+        let mut token_start_val = String::new();
 
         for attr in &variant.attrs {
             let (attr_ident, attr_lit) = read_attribute(attr);
@@ -80,7 +88,7 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
                     let regex_ident = syn::parse_str::<Ident>(&regex_ident_string).expect("Unknown parse error.");
 
                     let regex_init_statement = quote! {
-                        let #regex_ident = Regex::new(#literal_value).unwrap();
+                        static ref #regex_ident : Regex = Regex::new(#literal_value).unwrap();
                     };
                     
                     let match_statement = quote! {
@@ -119,6 +127,47 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
 
                 skip_statements.push(skip_statement);
             }
+
+            else if attr_ident == token_start_ident {
+                if let Some(Lit::Str(literal)) = attr_lit {
+                    token_start_val = literal.value();
+                }
+            }
+
+            else if attr_ident == token_end_ident {
+                if let Some(Lit::Str(literal)) = attr_lit {
+                    token_end_val = literal.value();
+                }
+            }
+
+            else if attr_ident == prio_ident {
+                if let Some(Lit::Int(literal)) = attr_lit {
+                    let prio: u8 = literal.base10_parse().expect("Priority needs to be an 8-bit unsigned integer.");
+                    let prio_statement = quote! {
+                        if *self == #name::#variant_ident {
+                            return #prio;
+                        }
+                    };
+                    prio_statements.push(prio_statement);
+                }
+            }
+        }
+
+        if !token_start_val.is_empty() && !token_end_val.is_empty() {
+            let match_statement = quote! {
+                if input.starts_with(#token_start_val) {
+                    if !input[0..input.len() - 1].ends_with(#token_end_val) {
+                        matches.push(#name::#variant_ident);
+                    }
+                }
+            };
+            let inclusive_statement = quote! {
+                if *self == #name::#variant_ident {
+                    return true;
+                }
+            };
+            match_statements.push(match_statement);
+            inclusive_statements.push(inclusive_statement);
         }
     }
 
@@ -141,9 +190,11 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
             fn match_token(input: &str) -> Vec<#name> {
                 let mut matches: Vec<#name> = Vec::new();
                 
-                #(
-                    #regex_init_statements
-                )*
+                lazy_static! {
+                    #(
+                        #regex_init_statements
+                    )*
+                }
 
                 #(
                     #match_statements
@@ -166,6 +217,22 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
                 )*
 
                 false
+            }
+
+            fn is_inclusive(&self) -> bool {
+                #(
+                    #inclusive_statements
+                )*
+
+                false
+            }
+
+            fn prio(&self) -> u8 {
+                #(
+                    #prio_statements
+                )*
+                
+                0
             }
         }
     };

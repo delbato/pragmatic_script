@@ -6,7 +6,7 @@ use crate::{
     }
 };
 
-use logos::Logos;
+use pglex::prelude::Lexable;
 
 #[test]
 fn test_parse_import_decl() {

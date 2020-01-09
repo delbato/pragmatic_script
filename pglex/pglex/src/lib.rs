@@ -1,7 +1,7 @@
 #[cfg(feature = "derive")]
 pub extern crate pglex_derive as derive;
 extern crate regex;
-extern crate lazy_static;
+pub extern crate lazy_static;
 
 pub mod lexer;
 
@@ -9,7 +9,7 @@ pub mod source;
 
 pub mod lexable;
 
-#[cfg(test)]
+//#[cfg(test)]
 mod test;
 
 pub mod prelude {
@@ -18,4 +18,5 @@ pub mod prelude {
     pub use crate::source::Source;
     #[cfg(feature = "derive")]
     pub use crate::derive::Lexable;
+    pub use crate::regex::Regex;
 }

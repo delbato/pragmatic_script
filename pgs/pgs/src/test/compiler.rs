@@ -18,7 +18,7 @@ use crate::{
 
 use std::collections::HashMap;
 
-use logos::Logos;
+use pglex::prelude::Lexable;
 
 #[test]
 fn test_compile_addi() {

@@ -62,6 +62,16 @@ impl<'source, T, S> Lexer<T, S>
         let mut begin_pos = self.current_pos;
         let mut matched_in_past = false;
 
+        if begin_pos >= self.source_end {
+            self.token_begin = begin_pos;
+            self.token_end = begin_pos;
+            self.token = T::get_end_variant();
+            return;
+        }
+        
+        println!("Lexer advance source len: {}", self.source_end);
+        println!("Lexer advance remaining input: {}", self.source.get_slice(self.current_pos, self.source_end));
+
         let mut current_slice = String::new();
         let mut last_slice;
 
@@ -75,16 +85,19 @@ impl<'source, T, S> Lexer<T, S>
 
             let token_matches = T::match_token(&current_slice);
 
+            println!("Token matches: {:?}", token_matches);
+
             if token_matches.is_empty() && self.is_whitespace(last_slice) {
                 if matched_in_past {
+                    println!("Breaking out of lexer loop.");
                     break;
-                } else {
+                } else if current_slice.trim().is_empty() {
                     begin_pos += 1;
                     current_slice = String::from(current_slice.trim_start());
                 }
             }
 
-            if token_matches.len() > 0 && token_matches == last_matches {
+            if token_matches == last_matches {
                 for token in token_matches.iter() {
                     if let Some(range) = token_match_map.get_mut(token) {
                         *range = range.start..self.current_pos + 1;
@@ -92,13 +105,19 @@ impl<'source, T, S> Lexer<T, S>
                 }
             }
 
-            if token_matches.len() > 0 && token_matches != last_matches {
+            if token_matches != last_matches {
                 matched_in_past = true;
 
                 for token in last_matches.iter() {
                     if !token_matches.contains(token) {
                         if let Some(range) = token_match_map.get_mut(token) {
-                            *range = range.start..self.current_pos;
+                            if token.is_inclusive() {
+                                println!("It is inclusive.");
+                                *range = range.start..self.current_pos - 1;
+                                println!("Slice: {}", self.source.get_slice(range.start, range.end));
+                            } else {
+                                *range = range.start..self.current_pos;
+                            }
                         }
                     }
                 }
@@ -124,6 +143,18 @@ impl<'source, T, S> Lexer<T, S>
 
         let mut match_results: Vec<(T, Range<usize>)> = token_match_map.into_iter().collect();
 
+        match_results.sort_by(|(t1, range1), (t2, range2)| {
+            let len1 = range1.len();
+            let len2 = range2.len();
+            let prio1 = t1.prio();
+            let prio2 = t2.prio();
+            if len1 == len2 {
+                return prio2.cmp(&prio1);
+            } else {
+                return len2.cmp(&len1);
+            }
+        });
+
         if match_results.is_empty() {
             self.token = T::get_error_variant();
             self.token_begin = begin_pos;
@@ -131,12 +162,10 @@ impl<'source, T, S> Lexer<T, S>
             return;
         }
 
-        match_results.sort_by(|(_, range1), (_, range2)| {
-            let len1 = range1.len();
-            let len2 = range2.len();
-            len2.cmp(&len1)
-        });
         let (token, token_range) = match_results.get(0).unwrap();
+
+        println!("Best match: {:?}, {:?}", token, token_range);
+        println!("Last token of this match: {}", self.source.get_at(token_range.end - 1));
 
         self.token_begin = token_range.start;
         self.token_end = token_range.end;
@@ -144,6 +173,7 @@ impl<'source, T, S> Lexer<T, S>
         self.token = token.clone();
 
         if self.token.should_skip() {
+            println!("Skipping this token.");
             self.advance();
         }
     }
