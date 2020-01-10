@@ -1,4 +1,3 @@
-extern crate logos;
 extern crate serde;
 extern crate byteorder;
 extern crate bincode;

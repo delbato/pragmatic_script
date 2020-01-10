@@ -20,5 +20,5 @@ pub trait Lexable: Sized + Clone + Eq + Hash + Debug {
     fn get_error_variant() -> Self;
     fn should_skip(&self) -> bool;
     fn is_inclusive(&self) -> bool;
-    fn prio(&self) -> u8;
+    fn prio(&self) -> i8;
 }

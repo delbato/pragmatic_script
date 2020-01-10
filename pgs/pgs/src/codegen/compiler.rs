@@ -102,6 +102,7 @@ impl Display for CompilerError {
 impl Error for CompilerError {}
 
 impl Compiler {
+    /// Creates a new compiler instance
     pub fn new() -> Compiler {
         let comp = Compiler {
             mod_context_stack: VecDeque::new(),
@@ -119,6 +120,14 @@ impl Compiler {
         comp
     }
 
+    /// Registers a new foreign module in the compiler.
+    /// 
+    /// Params:
+    /// * `module`: The foreign module to register in the engine
+    /// * `parent_path`: The module to recursively register this module under
+    /// 
+    /// Returns:  
+    /// Empty result if registered successfully, errors otherwise.
     pub fn register_foreign_module(&mut self, module: &mut Module, parent_path: String) -> CompilerResult<()> {
         let mod_name = module.name.clone();
         let mut path;
@@ -180,39 +189,45 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn push_context(&mut self) {
-        let stack_size = {
-            let front_context_opt = self.fn_context_stack.get(0);
-            if front_context_opt.is_some() {
-                front_context_opt.unwrap().stack_size
-            } else {
-                0
-            }
-        };
-        let mut context = FunctionContext::new();
-        context.stack_size = stack_size;
-        self.fn_context_stack.push_front(context);
-    }
-
+    /// Pushes a loop context on the loop context stack
+    /// 
+    /// Params:
+    /// * `ctx`: LoopContext to push on the stack
     pub fn push_loop_context(&mut self, ctx: LoopContext) {
         self.loop_context_stack.push_front(ctx);
     }
 
+    /// Pops the current loop context off the stack
+    /// 
+    /// Returns:  
+    /// A LoopContext
     pub fn pop_loop_context(&mut self) -> CompilerResult<LoopContext> {
         self.loop_context_stack.pop_front()
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Gets a reference to the current loop context
+    /// 
+    /// Returns:  
+    /// Reference to current loop context
     pub fn get_current_loop_context(&self) -> CompilerResult<&LoopContext> {
         self.loop_context_stack.get(0)
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Gets a mutable reference to the current loop context
+    /// 
+    /// Returns:  
+    /// Mutable reference to current loop context
     pub fn get_current_loop_context_mut(&mut self) -> CompilerResult<&mut LoopContext> {
         self.loop_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Resolves a container name to a container definition
+    /// 
+    /// Returns:  
+    /// Result containing the ContainerDef if found, errors otherwise
     pub fn resolve_cont(&self, name: &String) -> CompilerResult<ContainerDef> {
         // If directly accessing via module namespace
         if name.contains("::") {
@@ -340,6 +355,10 @@ impl Compiler {
         }
     }
 
+    /// Gets a reference to the first parent non-weak FunctionContext and its index
+    /// 
+    /// Returns:  
+    /// A Result containing a Tuple with the index and a reference to the FunctionContext
     pub fn get_parent_fn(&self) -> CompilerResult<(usize, &FunctionContext)> {
         let mut fn_opt = None;
 
@@ -360,6 +379,10 @@ impl Compiler {
         Ok((index, ctx))
     }
 
+    /// Gets a mutable reference to the first parent non-weak FunctionContext and its index
+    /// 
+    /// Returns:  
+    /// A Result containing a Tuple with the index and a mutable reference to the FunctionContext
     pub fn get_parent_fn_mut(&mut self) -> CompilerResult<(usize, &mut FunctionContext)> {
         let mut fn_opt = None;
 
@@ -383,10 +406,12 @@ impl Compiler {
         Ok((0, ctx))
     }
 
+    /// Splits a module path
     pub fn get_module_path<'s>(&self, name: &'s String) -> Vec<&'s str> {
         name.split("::").collect()
     }
 
+    /// Retrieves the root module, which is always at the top of the stack
     pub fn get_root_module(&self) -> CompilerResult<&ModuleContext> {
         if self.mod_context_stack.len() == 0 {
             return Err(CompilerError::Unknown);
@@ -395,6 +420,7 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Retrieves the direct parent module
     pub fn get_super_module(&self) -> CompilerResult<&ModuleContext> {
         if self.mod_context_stack.len() < 2 {
             return Err(CompilerError::Unknown);
@@ -403,6 +429,7 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Retrieves the current module
     pub fn get_current_module(&self) -> CompilerResult<&ModuleContext> {
         if self.mod_context_stack.len() == 0 {
             return Err(CompilerError::Unknown);
@@ -411,6 +438,7 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Retrieves a mutable reference to the current module
     pub fn get_current_module_mut(&mut self) -> CompilerResult<&mut ModuleContext> {
         if self.mod_context_stack.len() == 0 {
             return Err(CompilerError::Unknown);
@@ -419,32 +447,39 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Gets a copy of the current function context
     pub fn get_context(&mut self) -> Option<FunctionContext> {
         self.fn_context_stack.get(0).cloned()
     }
 
+    /// Pushes a function context on the stack
     pub fn push_new_context(&mut self, context: FunctionContext) {
         self.fn_context_stack.push_front(context);
     }
 
+    /// Pushes a new empty function context on the stack
     pub fn push_empty_context(&mut self) {
         self.fn_context_stack.push_front(FunctionContext::new());
     }
 
+    /// Pushes the root module context on the stack
     pub fn push_default_module_context(&mut self) {
         self.mod_context_stack.push_front(
             ModuleContext::new(String::from("root"))
         );
     }
 
+    /// Pops the current module context off the stack
     pub fn pop_module_context(&mut self) -> Option<ModuleContext> {
         self.mod_context_stack.pop_front()
     }
 
+    /// DEPRECATED: Reset global function context
     pub fn reset_global(&mut self) {
         self.global_context = FunctionContext::new();
     }
 
+    /// Returns the byte size of a given Type
     pub fn size_of_type(&self, var_type: &Type) -> CompilerResult<usize> {
         let size = match var_type {
             Type::Int => 8,
@@ -459,6 +494,7 @@ impl Compiler {
         Ok(size)
     }
 
+    /// Returns the type of a variable
     pub fn type_of_var(&self, var_name: &String) -> CompilerResult<Type> {
         let front_context = self.fn_context_stack.get(0)
             .ok_or(CompilerError::UnknownVariable)?;
@@ -467,6 +503,7 @@ impl Compiler {
         Ok(var_type.clone())
     }
 
+    /// Returns the type of a function
     pub fn type_of_fn(&self, fn_name: &String) -> CompilerResult<Type> {
         let (_, fn_type, _) = self.resolve_fn(fn_name)?;
         Ok(
@@ -474,15 +511,18 @@ impl Compiler {
         )
     }
 
+    /// Get resulting instruction code
     pub fn get_resulting_code(&mut self) -> Vec<u8> {
         let builder = self.builder.clone();
         builder.build()
     }
 
+    /// Get reference to instruction builder
     pub fn get_builder_ref(&self) -> &Builder {
         &self.builder
     }
 
+    /// Build and get the program
     pub fn get_program(&mut self) -> CompilerResult<Program> {
         let mut builder = self.builder.clone();
         let mut functions = HashMap::new();
@@ -530,6 +570,7 @@ impl Compiler {
         Ok(program)
     }
 
+    /// Get or generate a new, unique tag
     pub fn get_tag(&mut self) -> u64 {
         let mut rng = thread_rng();
         let mut tag = rng.next_u64();
@@ -539,6 +580,7 @@ impl Compiler {
         tag
     }
 
+    /// Get or generate a new, unique function uid
     pub fn get_function_uid(&mut self, function_name: &String) -> u64 {
         let opt = self.function_uid_map.get(function_name);
         if opt.is_some() {
@@ -555,6 +597,7 @@ impl Compiler {
         }
     }
 
+    /// Get or generate a new, unique loop uid
     pub fn get_loop_uid(&mut self) -> u64 {
         let mut rng = thread_rng();
         let mut uid = rng.next_u64();
@@ -564,6 +607,7 @@ impl Compiler {
         uid
     }
 
+    /// Get full function name from local name, by prefixing parent modules
     pub fn get_full_function_name(&mut self, function_name: &String) -> String {
         let mut full_fn_name = String::new();
 
@@ -577,10 +621,12 @@ impl Compiler {
         full_fn_name
     }
 
+    /// Reset the internal builder
     pub fn reset_builder(&mut self) {
         self.builder = Builder::new();
     }
 
+    /// Pre-Declare a declaration list
     pub fn decl_decl_list(&mut self, decl_list: &Vec<Declaration>) -> CompilerResult<()> {
         let mod_name = {
             self.get_current_module()?.name.clone()
@@ -593,6 +639,7 @@ impl Compiler {
         Ok(())
     }
 
+    /// Declare declarations
     pub fn decl_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
         match decl {
             Declaration::Function(_) => self.decl_fn_decl(decl)?,
@@ -604,6 +651,7 @@ impl Compiler {
         Ok(())
     }
 
+    /// Declare import declaration
     pub fn decl_import_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
         let (import_path, import_name) = match decl {
             Declaration::Import(import_path, import_name) => (import_path.clone(), import_name.clone()),
@@ -622,6 +670,7 @@ impl Compiler {
         Ok(())
     }
 
+    /// Declare function declaration
     pub fn decl_fn_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
         let fn_decl_args = match decl {
             Declaration::Function(fn_decl_args) => fn_decl_args,

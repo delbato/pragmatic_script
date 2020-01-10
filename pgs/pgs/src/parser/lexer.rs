@@ -6,15 +6,7 @@ use std::{
     }
 };
 
-use pglex::{
-    prelude::{
-        Lexable,
-        Lexer,
-        Regex,
-        Source
-    },
-    lazy_static::lazy_static
-};
+use pglex::prelude::*;
 
 pub type PgLexer<'source> = Lexer<Token, &'source str>;
 

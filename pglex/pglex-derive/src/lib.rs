@@ -142,7 +142,7 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
 
             else if attr_ident == prio_ident {
                 if let Some(Lit::Int(literal)) = attr_lit {
-                    let prio: u8 = literal.base10_parse().expect("Priority needs to be an 8-bit unsigned integer.");
+                    let prio: i8 = literal.base10_parse().expect("Priority needs to be an 8-bit signed integer.");
                     let prio_statement = quote! {
                         if *self == #name::#variant_ident {
                             return #prio;
@@ -227,7 +227,7 @@ pub fn derive_lexable(input: TokenStream) -> TokenStream {
                 false
             }
 
-            fn prio(&self) -> u8 {
+            fn prio(&self) -> i8 {
                 #(
                     #prio_statements
                 )*

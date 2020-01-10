@@ -69,8 +69,8 @@ impl<'source, T, S> Lexer<T, S>
             return;
         }
         
-        println!("Lexer advance source len: {}", self.source_end);
-        println!("Lexer advance remaining input: {}", self.source.get_slice(self.current_pos, self.source_end));
+        //println!("Lexer advance source len: {}", self.source_end);
+        //println!("Lexer advance remaining input: {}", self.source.get_slice(self.current_pos, self.source_end));
 
         let mut current_slice = String::new();
         let mut last_slice;
@@ -85,11 +85,11 @@ impl<'source, T, S> Lexer<T, S>
 
             let token_matches = T::match_token(&current_slice);
 
-            println!("Token matches: {:?}", token_matches);
+            //println!("Token matches: {:?}", token_matches);
 
             if token_matches.is_empty() && self.is_whitespace(last_slice) {
                 if matched_in_past {
-                    println!("Breaking out of lexer loop.");
+                    //println!("Breaking out of lexer loop.");
                     break;
                 } else if current_slice.trim().is_empty() {
                     begin_pos += 1;
@@ -112,9 +112,9 @@ impl<'source, T, S> Lexer<T, S>
                     if !token_matches.contains(token) {
                         if let Some(range) = token_match_map.get_mut(token) {
                             if token.is_inclusive() {
-                                println!("It is inclusive.");
+                                //println!("It is inclusive.");
                                 *range = range.start..self.current_pos - 1;
-                                println!("Slice: {}", self.source.get_slice(range.start, range.end));
+                                //println!("Slice: {}", self.source.get_slice(range.start, range.end));
                             } else {
                                 *range = range.start..self.current_pos;
                             }
@@ -164,8 +164,8 @@ impl<'source, T, S> Lexer<T, S>
 
         let (token, token_range) = match_results.get(0).unwrap();
 
-        println!("Best match: {:?}, {:?}", token, token_range);
-        println!("Last token of this match: {}", self.source.get_at(token_range.end - 1));
+        //println!("Best match: {:?}, {:?}", token, token_range);
+        //println!("Last token of this match: {}", self.source.get_at(token_range.end - 1));
 
         self.token_begin = token_range.start;
         self.token_end = token_range.end;
@@ -173,7 +173,7 @@ impl<'source, T, S> Lexer<T, S>
         self.token = token.clone();
 
         if self.token.should_skip() {
-            println!("Skipping this token.");
+            //println!("Skipping this token.");
             self.advance();
         }
     }
