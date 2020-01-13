@@ -1,6 +1,6 @@
-# PragmaticScript
+# pragmatic\_script
 
-A pragmatic scripting language
+_A pragmatic scripting language_
 
 ### <i>! This is all very heavily WIP. Does not work properly yet !</i>
 
