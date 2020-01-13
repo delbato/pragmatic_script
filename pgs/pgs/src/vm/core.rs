@@ -187,6 +187,10 @@ impl Core {
                     let op: i64 = self.get_op()?;
                     self.push_stack(op)?;
                 },
+                Opcode::PUSHF => {
+                    let op: f32 = self.get_op()?;
+                    self.push_stack(op)?;
+                },
                 Opcode::PUSHB => {
                     let op: bool = self.get_op()?;
                     self.push_stack(op)?;
@@ -204,7 +208,21 @@ impl Core {
                 },
                 Opcode::SDUPI => {
                     let op: i64 = self.get_op()?;
+                    //println!("SDUPI {} ", op);
                     self.dupn_stack(op, 8)?;
+                },
+                Opcode::SDUPF => {
+                    let op: i64 = self.get_op()?;
+                    self.dupn_stack(op, 4)?;
+                },
+                Opcode::SDUPA => {
+                    let op: i64 = self.get_op()?;
+                    self.dupn_stack(op, 8)?;
+                },
+                Opcode::SDUPN => {
+                    let op: i64 = self.get_op()?;
+                    let size: usize = self.get_op()?;
+                    self.dupn_stack(op, size)?;
                 },
                 Opcode::ADDI => {
                     let rhs: i64 = self.pop_stack()?;
@@ -226,6 +244,26 @@ impl Core {
                     let lhs: i64 = self.pop_stack()?;
                     self.push_stack(lhs / rhs)?;
                 },
+                Opcode::ADDF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs + rhs)?;
+                },
+                Opcode::SUBF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs - rhs)?;
+                },
+                Opcode::MULF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs * rhs)?;
+                },
+                Opcode::DIVF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs / rhs)?;
+                },
                 Opcode::CALL => {
                     self.call()?;
                 },
@@ -240,6 +278,11 @@ impl Core {
                     let op: i64 = self.get_op()?;
                     let target_index = (self.sp as i64 + op) as usize;
                     self.movn(target_index, 8)?;
+                },
+                Opcode::SMOVF => {
+                    let op: i64 = self.get_op()?;
+                    let target_index = (self.sp as i64 + op) as usize;
+                    self.movn(target_index, 4)?;
                 },
                 Opcode::SVSWPI => {
                     let op: i64 = self.pop_stack()?;
@@ -277,11 +320,20 @@ impl Core {
                     let lhs: i64 = self.pop_stack()?;
                     self.push_stack(lhs <= rhs)?;
                 },
-                Opcode::SDUPA => {
-                    let op_offset: i64 = self.get_op()?;
-                    //println!("SDUPA offset: {}", op_offset);
-                    //println!("Stack size: {}", self.stack.len());
-                    self.dupn_stack(op_offset, 8)?;
+                Opcode::EQF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs == rhs)?;
+                },
+                Opcode::LTF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs < rhs)?;
+                },
+                Opcode::LTEQF => {
+                    let rhs: f32 = self.pop_stack()?;
+                    let lhs: f32 = self.pop_stack()?;
+                    self.push_stack(lhs <= rhs)?;
                 },
                 Opcode::PUSHA => {
                     let op: u64 = self.get_op()?;
@@ -341,88 +393,84 @@ impl Core {
         Ok(())
     }
 
-    #[inline]
-    fn sp_offset_to_address(&self, offset: i64) -> CoreResult<i64> {
-        let sp = self.sp as i64;
-
-        let addr = ((sp - offset) + 1) * -1;
-
-        Ok(addr)
-    }
-
     pub fn get_mem_string(&self, address: u64) -> CoreResult<String> {
-        let address = Address::from(address);
-        if address.address_type != AddressType::Program {
-            return Err(CoreError::Unknown)?;
-        }
+        let string_size = self.get_mem::<usize>(address)?;
 
-        let program = self.program.as_ref()
-            .ok_or(CoreError::Unknown)?;
-
-        let string_range = program
-            .static_pointers
-            .get(&(address.real_address as usize))
-            .cloned()
-            .ok_or(CoreError::Unknown)?;
-
-        let mut bytes = Vec::new();
-
-        for i in string_range {
-            bytes.push(program.code[i]);
-        }
+        let bytes = self.get_mem_n(address + 8, string_size)?;
 
         let string = unsafe {
             String::from_utf8_unchecked(bytes)
         };
+
         Ok(string)
     }
 
     #[inline]
-    fn get_mem<T: DeserializeOwned>(&mut self, address: i64) -> CoreResult<T> {
+    fn get_mem<T: DeserializeOwned>(&self, address: u64) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
-        let mut raw_bytes = Vec::with_capacity(op_size);
-        raw_bytes.resize(op_size, 0);
-
-        // If accessing the stack
-        if address < 0 {
-            let addr_usize = (i64::abs(address) as usize) - 1;
-
-            for i in 0..op_size {
-                raw_bytes[i] = self.stack[addr_usize + i];
-            }
-        } else { // If accessing the heap
-            let addr_usize = address as usize;
-
-            for i in 0..op_size {
-                raw_bytes[i] = self.heap[addr_usize + i];
-            }
-        }
+        let raw_bytes = self.get_mem_n(address, op_size)?;
 
         deserialize(&raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)
     }
 
     #[inline]
-    fn set_mem<T: Serialize>(&mut self, address: i64, item: T) -> CoreResult<()> {
-        let op_size = size_of::<T>();
+    fn get_mem_n(&self, address: u64, n: usize) -> CoreResult<Vec<u8>> {
+        let mut raw_bytes = Vec::with_capacity(n);
+        raw_bytes.resize(n, 0);
 
+        let address = Address::from(address);
+        match address.address_type {
+            AddressType::Program => {
+                let program = self.program.as_ref().unwrap();
+                for i in 0..n {
+                    let tmp = address.real_address as usize + i;
+                    raw_bytes[i] = program.code[tmp];
+                }
+            },
+            AddressType::Stack => {
+                for i in 0..n {
+                    let tmp = address.real_address as usize + i;
+                    raw_bytes[i] = self.stack[tmp];
+                }
+            },
+            _ => return Err(CoreError::Unknown)
+        };
+
+        Ok(raw_bytes)
+    }
+
+    #[inline]
+    fn set_mem<T: Serialize>(&mut self, address: u64, item: T) -> CoreResult<()> {
         let raw_bytes = serialize(&item)
             .map_err(|_| CoreError::OperatorSerialize)?;
 
-        if address < 0 {
-            let addr_usize = (i64::abs(address) as usize) - 1;
+        self.set_mem_n(address, &raw_bytes)?;
 
-            for i in 0..op_size {
-                self.stack[addr_usize + i] = raw_bytes[i];
-            }
-        } else {
-            let addr_usize = address as usize;
-            
-            for i in 0..op_size {
-                self.heap[addr_usize + i] = raw_bytes[i];
-            }
-        }
+        Ok(())
+    }
+
+    #[inline]
+    fn set_mem_n(&mut self, address: u64, bytes: &[u8]) -> CoreResult<()> {
+        let address = Address::from(address);
+
+        match address.address_type {
+            AddressType::Program => {
+                let program = self.program.as_mut().unwrap();
+                for i in 0..bytes.len() {
+                    let tmp = address.real_address as usize + i;
+                    program.code[tmp] = bytes[i];
+                }
+            },
+            AddressType::Stack => {
+                for i in 0..bytes.len() {
+                    let tmp = address.real_address as usize + i;
+                    self.stack[tmp] = bytes[i];
+                }
+            },
+            _ => return Err(CoreError::Unknown)
+        };
 
         Ok(())
     }
@@ -570,6 +618,19 @@ impl Core {
 
         deserialize(&raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)
+    }
+
+    #[inline]
+    pub fn get_stack_addr(&self, offset: i64) -> CoreResult<u64> {
+        let sp;
+        if offset < 0 {
+            sp = self.sp - i64::abs(offset) as usize;
+        } else {
+            sp = self.sp + i64::abs(offset) as usize;
+        }
+
+        let address = Address::new(sp as u64, AddressType::Stack);
+        Ok(address.raw_address)
     }
 
     #[inline]

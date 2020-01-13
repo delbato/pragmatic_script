@@ -31,7 +31,7 @@ fn register_std_print(engine: &mut Engine) -> EngineResult<()> {
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack(-8)
+                let string_addr: u64 = core.get_stack_addr(-16)
                     .map_err(|_| FunctionError::Unknown)?;
                 let string = core.get_mem_string(string_addr)
                     .map_err(|_| FunctionError::Unknown)?;
@@ -46,7 +46,7 @@ fn register_std_print(engine: &mut Engine) -> EngineResult<()> {
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack(-8)
+                let string_addr: u64 = core.get_stack_addr(-16)
                     .map_err(|_| FunctionError::Unknown)?;
                 let string = core.get_mem_string(string_addr)
                     .map_err(|_| FunctionError::Unknown)?;

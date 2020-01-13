@@ -12,6 +12,9 @@ pub enum Expression {
     StringLiteral(String),
     BoolLiteral(bool),
     Variable(String),
+    MemberAccess(Box<Expression>, Box<Expression>),
+    Deref(Box<Expression>),
+    Ref(Box<Expression>),
     Call(String, Vec<Expression>),
     Addition(Box<Expression>, Box<Expression>),
     Subtraction(Box<Expression>, Box<Expression>),
@@ -23,7 +26,12 @@ pub enum Expression {
     GreaterThan(Box<Expression>, Box<Expression>),
     LessThan(Box<Expression>, Box<Expression>),
     GreaterThanEquals(Box<Expression>, Box<Expression>),
-    LessThanEquals(Box<Expression>, Box<Expression>)
+    LessThanEquals(Box<Expression>, Box<Expression>),
+    Assign(Box<Expression>, Box<Expression>),
+    AddAssign(Box<Expression>, Box<Expression>),
+    SubAssign(Box<Expression>, Box<Expression>),
+    MulAssign(Box<Expression>, Box<Expression>),
+    DivAssign(Box<Expression>, Box<Expression>),
 }
 
 impl Expression {
@@ -62,6 +70,43 @@ impl Expression {
             },
             Expression::Division(lhs, rhs) => {
                 println!("{} Division:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1)
+            },
+            Expression::MemberAccess(lhs, rhs) => {
+                println!("{} Member access:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1);
+            },
+            Expression::Call(fn_name, args) => {
+                println!("{} Call \"{}\":", baseline, fn_name);
+                println!("{} Arguments:", baseline);
+                for arg in args.iter() {
+                    arg.print(n + 1);
+                }
+            },
+            Expression::Assign(lhs, rhs) => {
+                println!("{} Assign:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1)
+            },
+            Expression::AddAssign(lhs, rhs) => {
+                println!("{} AddAssign:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1)
+            },
+            Expression::SubAssign(lhs, rhs) => {
+                println!("{} SubAssign:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1)
+            },
+            Expression::MulAssign(lhs, rhs) => {
+                println!("{} MulAssign:", baseline);
+                lhs.print(n + 1);
+                rhs.print(n + 1)
+            },
+            Expression::DivAssign(lhs, rhs) => {
+                println!("{} DivAssign:", baseline);
                 lhs.print(n + 1);
                 rhs.print(n + 1)
             },
@@ -128,6 +173,7 @@ pub enum Statement {
     While(Box<Expression>, Vec<Statement>),
     Break,
     Continue,
+    Expression(Expression),
     If(Box<Expression>, Vec<Statement>),
     IfElse(Box<Expression>, Vec<Statement>, Vec<Statement>),
     IfElseIf(Box<Expression>, Vec<Statement>, Vec<(Box<Expression>, Vec<Statement>)>)

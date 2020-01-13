@@ -87,13 +87,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     if arguments_opt.is_some() {
         let arguments: Vec<&str> = arguments_opt.unwrap().collect();
         for arg in arguments {
-            let int = String::from(arg).parse::<i64>()
-                .map_err(|e| {
-                    println!("ERROR! Only int arguments are supported for now.");
-                    e
-                })?;
-            
-            engine.push_stack(int)?;
+            let int_res = String::from(arg).parse::<i64>();
+            let float_res = String::from(arg).parse::<f32>();
+
+            if int_res.is_err() && float_res.is_err() {
+                println!("ERROR! Not an integer or float.");
+            }
+            if int_res.is_ok() {
+                engine.push_stack(int_res.unwrap())?;
+            }
+            if float_res.is_ok() {
+                engine.push_stack(float_res.unwrap())?;
+            }
         }
     }
 

@@ -205,7 +205,7 @@ fn test_engine_foreign_function_string() {
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack(-8)
+                let string_addr: u64 = core.get_stack_addr(-16)
                     .map_err(|_| FunctionError::Unknown)?;
                 let string = core.get_mem_string(string_addr)
                     .map_err(|_| FunctionError::Unknown)?;
@@ -239,11 +239,69 @@ fn test_engine_foreign_function_string() {
     let load_res = engine.load_code(code);
     assert!(load_res.is_ok());
 
+    for instr in engine.compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+    }
+
     let run_res = engine.run_fn(&String::from("root::main"));
+    println!("{:?}", run_res);
     assert!(run_res.is_ok());
 
     let pop_res = engine.pop_stack::<i64>();
     assert!(pop_res.is_ok());
 
     assert_eq!(pop_res.unwrap(), 69);
+}
+
+#[test]
+fn test_engine_add_assign() {
+    let mut engine = Engine::new(128);
+
+    let function = Function::new(String::from("printi"))
+        .with_argument(Type::Int)
+        .with_return_type(Type::Int)
+        .with_callback(
+            Box::new(move |core: &mut Core| {
+                let int: i64 = core.get_stack(-8)
+                    .map_err(|_| FunctionError::Unknown)?;
+                println!("{}", int);
+                core.push_stack::<i64>(0)
+                    .map_err(|_| FunctionError::Unknown)
+            })
+        );
+    
+    let module = Module::new(String::from("std"))
+        .with_function(function);
+    
+    let reg_res = engine.register_module(module);
+    assert!(reg_res.is_ok());
+
+    let code = "
+        import std::printi;
+
+        fn: main(until: int) ~ int {
+            var i: int = 0;
+
+            while i < until {
+                printi(i);
+                i += 1;
+            }
+
+            return i;
+        }
+    ";
+
+    let load_res = engine.load_code(code);
+    assert!(load_res.is_ok());
+
+    let push_res = engine.push_stack::<i64>(1024);
+    assert!(push_res.is_ok());
+
+    let run_res = engine.run_fn(&String::from("root::main"));
+    assert!(run_res.is_ok());
+
+    let pop_res = engine.pop_stack::<i64>();
+    assert!(pop_res.is_ok());
+
+    assert_eq!(pop_res.unwrap(), 1024);
 }

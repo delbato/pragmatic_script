@@ -126,6 +126,18 @@ pub enum Token {
     #[token = "="]
     Assign,
 
+    #[token = "+="]
+    AddAssign,
+
+    #[token = "-="]
+    SubAssign,
+
+    #[token = "*="]
+    MulAssign,
+
+    #[token = "/="]
+    DivAssign,
+
     #[token = "+"]
     Plus,
     
@@ -158,6 +170,15 @@ pub enum Token {
 
     #[token = "~"]
     Tilde,
+
+    #[token = "&"]
+    And,
+
+    #[token = "."]
+    Dot,
+
+    #[token = ".."]
+    DoubleDot,
 
     #[token = "return"]
     #[prio = 1]

@@ -452,3 +452,47 @@ fn test_parse_loop() {
         println!("loop stmt list: {:?}", stmt_list);
     }
 }
+
+#[test]
+fn test_parse_member() {
+    let code = String::from("
+        engine.blub.get() * engine.foo;
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let expr_res = parser.parse_expr(&mut lexer, &[ Token::Semicolon ]);
+    assert!(expr_res.is_ok());
+
+    expr_res.unwrap().print(0);
+}
+
+#[test]
+fn test_parse_add_assign() {
+    let code = String::from("
+        engine.blub += 12.7;
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let expr_res = parser.parse_expr(&mut lexer, &[ Token::Semicolon ]);
+    assert!(expr_res.is_ok());
+
+    expr_res.unwrap().print(0);
+}
+
+#[test]
+fn test_parse_stmt_expr() {
+    let code = String::from("
+            engine.blub += 12.7;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let stmt_list_res = parser.parse_statement_list(&mut lexer);
+    assert!(stmt_list_res.is_ok());
+}

@@ -89,6 +89,12 @@ impl Display for ParseError {
 
 impl Error for ParseError {}
 
+macro_rules! make_parse_error {
+    ($lexer:ident, $error:expr) => {
+        Err(ParseError::new($error, $lexer.range()))
+    };
+}
+
 pub type ParseResult<T> = Result<T, ParseError>;
 
 pub struct Parser {
@@ -108,6 +114,15 @@ fn is_op(token: &Token) -> bool {
         Token::LessThan => true,
         Token::LessThanEquals => true,
         Token::Not => true,
+        Token::Tilde => true,
+        Token::And => true,
+        Token::Dot => true,
+        Token::Assign => true,
+        Token::AddAssign => true,
+        Token::MulAssign => true,
+        Token::SubAssign => true,
+        Token::DivAssign => true,
+        Token::DoubleDot => true,
         _ => false
     }
 }
@@ -125,6 +140,15 @@ fn op_prec(token: &Token) -> i8 {
         Token::LessThan => 0,
         Token::LessThanEquals => 0,
         Token::Not => 3,
+        Token::And => 1,
+        Token::Tilde => 1,
+        Token::Dot => 4,
+        Token::Assign => 0,
+        Token::AddAssign => 0,
+        Token::MulAssign => 0,
+        Token::SubAssign => 0,
+        Token::DivAssign => 0,
+        Token::DoubleDot => 0,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -144,6 +168,15 @@ fn is_op_right_assoc(token: &Token) -> bool {
         Token::LessThan => false,
         Token::LessThanEquals => false,
         Token::Not => true,
+        Token::Tilde => true,
+        Token::And => true,
+        Token::Dot => true,
+        Token::Assign => true,
+        Token::AddAssign => true,
+        Token::MulAssign => true,
+        Token::SubAssign => true,
+        Token::DivAssign => true,
+        Token::DoubleDot => false,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -258,13 +291,6 @@ impl Parser {
             // Swallow the name
             lexer.advance();
 
-            // Work around Logos being broken
-            if import_string_end.len() == 1 && lexer.token == Token::Text {
-                import_string += lexer.slice();
-                import_string_end += lexer.slice();
-                lexer.advance();
-            }
-
             if lexer.token != Token::DoubleColon {
                 break;
             }
@@ -348,16 +374,6 @@ impl Parser {
             Token::Bool => Type::Bool,
             Token::Text => {
                 let mut type_name = String::from(lexer.slice());
-                // Workaround for broken Lexer
-                if type_name.len() == 1 {
-                    let lexer_backup = lexer.clone();
-                    lexer.advance();
-                    if lexer.token == Token::Text {
-                        type_name += lexer.slice();
-                    } else {
-                        *lexer = lexer_backup;
-                    }
-                }
                 Type::Other(type_name)
             },
             _ => {
@@ -699,14 +715,6 @@ impl Parser {
                 Token::Var => {
                     ret.push(self.parse_var_decl(lexer)?);
                 },
-                Token::Text => {
-                    let call_res = self.try_parse_call_stmt(lexer);
-                    if call_res.is_err() {
-                        ret.push(self.parse_var_assign(lexer)?);
-                        continue;
-                    }
-                    ret.push(call_res.unwrap());
-                },
                 Token::Return => {
                     ret.push(self.parse_return(lexer)?);
                 },
@@ -726,7 +734,10 @@ impl Parser {
                     ret.push(self.parse_loop(lexer)?);
                 },
                 _ => {
-                    return Err(ParseError::new(ParseErrorType::UnknownStatement, lexer.range()));
+                    let expr = self.parse_expr(lexer, &[Token::Semicolon])?;
+                    // Swallow ";"
+                    lexer.advance();
+                    ret.push(Statement::Expression(expr));
                 }
             };
             
@@ -1072,6 +1083,44 @@ impl Parser {
             Token::Not => {
                 let op = operand_stack.pop_front().unwrap();
                 Expression::Not(Box::new(op))
+            },
+            Token::Tilde => {
+                let op = operand_stack.pop_front().unwrap();
+                Expression::Ref(Box::new(op))
+            },
+            Token::And => {
+                let op = operand_stack.pop_front().unwrap();
+                Expression::Deref(Box::new(op))
+            },
+            Token::Dot => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::MemberAccess(Box::new(lhs), Box::new(rhs))
+            },
+            Token::Assign => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::Assign(Box::new(lhs), Box::new(rhs))
+            },
+            Token::AddAssign => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::AddAssign(Box::new(lhs), Box::new(rhs))
+            },
+            Token::SubAssign => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::SubAssign(Box::new(lhs), Box::new(rhs))
+            },
+            Token::MulAssign => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::MulAssign(Box::new(lhs), Box::new(rhs))
+            },
+            Token::DivAssign => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::DivAssign(Box::new(lhs), Box::new(rhs))
             },
             _ => {
                 return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));

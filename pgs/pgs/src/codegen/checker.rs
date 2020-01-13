@@ -127,6 +127,50 @@ impl<'c> Checker<'c> {
                 }
                 Type::Bool
             },
+            Expression::MemberAccess(_, _) => {
+                unimplemented!("Member access compilation");
+            },
+            Expression::Assign(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CheckerError::TypeMismatch);
+                }
+                lhs_type
+            },
+            Expression::AddAssign(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CheckerError::TypeMismatch);
+                }
+                lhs_type
+            },
+            Expression::SubAssign(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CheckerError::TypeMismatch);
+                }
+                lhs_type
+            },
+            Expression::MulAssign(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CheckerError::TypeMismatch);
+                }
+                lhs_type
+            },
+            Expression::DivAssign(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CheckerError::TypeMismatch);
+                }
+                lhs_type
+            },
+            _ => unimplemented!("!")
         })
     } 
 }

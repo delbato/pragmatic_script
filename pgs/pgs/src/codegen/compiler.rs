@@ -48,7 +48,8 @@ use std::{
         Display,
         Formatter,
         Result as FmtResult
-    }
+    },
+    ops::Deref
 };
 
 use rand::{
@@ -90,7 +91,8 @@ pub enum CompilerError {
     IfOnlyAcceptsBooleanExpressions,
     WhileOnlyAcceptsBooleanExpressions,
     ExpectedBreak,
-    ExpectedContinue
+    ExpectedContinue,
+    UnsupportedStatementExpression
 }
 
 impl Display for CompilerError {
@@ -484,9 +486,12 @@ impl Compiler {
         let size = match var_type {
             Type::Int => 8,
             Type::Float => 4,
-            Type::String => 8,
+            Type::String => 16,
             Type::Bool => 1,
-            Type::Reference(_) => 8,
+            Type::Reference(inner_type) => match *(*inner_type) {
+                Type::AutoArray(_) => 16,
+                _ => 8
+            },
             _ => {
                 return Err(CompilerError::UnknownType);
             }
@@ -812,13 +817,20 @@ impl Compiler {
         self.fn_context_stack.push_front(context);
 
         if let Some(statements) = fn_decl_args.code_block {
-            for statement in statements {
-                self.compile_statement(&statement)?;
-            }
+            self.compile_statement_list(&statements)?;
         }
 
-        self.fn_context_stack.pop_front();
+        let ctx = self.fn_context_stack.pop_front();
 
+        //println!("Fn decl context: {:?}", ctx);
+
+        Ok(())
+    }
+
+    pub fn compile_statement_list(&mut self, stmt_list: &[Statement]) -> CompilerResult<()> {
+        for stmt in stmt_list.iter() {
+            self.compile_statement(stmt)?;
+        }
         Ok(())
     }
 
@@ -827,14 +839,8 @@ impl Compiler {
             Statement::VariableDecl(_) => {
                 self.compile_var_decl_stmt(stmt)?
             },
-            Statement::Assignment(_, _) => {
-                self.compile_var_assign_stmt(stmt)?
-            },
             Statement::Return(_) => {
                 self.compile_return_stmt(stmt)?
-            },
-            Statement::Call(_, _) => {
-                self.compile_call_stmt(stmt)?;
             },
             Statement::If(_, _) => {
                 self.compile_if_stmt(stmt)?;  
@@ -842,10 +848,58 @@ impl Compiler {
             Statement::While(_, _ ) => {
                 self.compile_while_stmt(stmt)?;  
             },
+            Statement::Expression(_) => {
+                self.compile_stmt_expr(stmt)?;
+            },
             Statement::Break => self.compile_break_stmt(stmt)?,
             Statement::Continue => self.compile_continue_stmt(stmt)?,
             _ => {
                 return Err(CompilerError::NotImplemented);
+            }
+        };
+
+        Ok(())
+    }
+
+    pub fn compile_stmt_expr(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        let expr = match stmt {
+            Statement::Expression(expr) => expr,
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        match expr {
+            Expression::Assign(_, _) => {
+                self.compile_var_assign_expr(expr)?;
+            },
+            Expression::AddAssign(lhs, rhs) => {
+                let var_expr = lhs.clone();
+                let add_expr = Box::new(Expression::Addition(var_expr.clone(), rhs.clone()));
+                let assign_expr = Box::new(Expression::Assign(var_expr, add_expr));
+                self.compile_var_assign_expr(&assign_expr)?
+            },
+            Expression::SubAssign(lhs, rhs) => {
+                let var_expr = lhs.clone();
+                let add_expr = Box::new(Expression::Subtraction(var_expr.clone(), rhs.clone()));
+                let assign_expr = Box::new(Expression::Assign(var_expr, add_expr));
+                self.compile_var_assign_expr(&assign_expr)?
+            },
+            Expression::MulAssign(lhs, rhs) => {
+                let var_expr = lhs.clone();
+                let add_expr = Box::new(Expression::Multiplication(var_expr.clone(), rhs.clone()));
+                let assign_expr = Box::new(Expression::Assign(var_expr, add_expr));
+                self.compile_var_assign_expr(&assign_expr)?
+            },
+            Expression::DivAssign(lhs, rhs) => {
+                let var_expr = lhs.clone();
+                let add_expr = Box::new(Expression::Division(var_expr.clone(), rhs.clone()));
+                let assign_expr = Box::new(Expression::Assign(var_expr, add_expr));
+                self.compile_var_assign_expr(&assign_expr)?
+            },
+            Expression::Call(_, _) => {
+                self.compile_call_stmt_expr(expr)?;
+            }
+            _ => {
+                return Err(CompilerError::UnsupportedStatementExpression);
             }
         };
 
@@ -874,6 +928,8 @@ impl Compiler {
             return Err(CompilerError::WhileOnlyAcceptsBooleanExpressions);
         }
 
+        //println!("Compiling while expr: {:?}", while_expr);
+
         self.compile_expr(while_expr)?;
         self.builder.tag(tag_end);
 
@@ -885,6 +941,7 @@ impl Compiler {
             let front_context = self.fn_context_stack.get_mut(0)
                 .ok_or(CompilerError::Unknown)?;
             front_context.stack_size -= 1;
+            //println!("While parent context stack size: {}", front_context.stack_size);
         }
 
         let mut weak_context = {
@@ -901,6 +958,8 @@ impl Compiler {
 
         weak_context = self.fn_context_stack.pop_front()
             .ok_or(CompilerError::Unknown)?;
+
+        //println!("End of while. While context stack size: {}", weak_context.stack_size);
         
         let popn_size = weak_context.stack_size as u64;
 
@@ -1063,9 +1122,9 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_call_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+    pub fn compile_call_stmt_expr(&mut self, stmt: &Expression) -> CompilerResult<()> {
         let (fn_name, params) = match stmt {
-            Statement::Call(fn_name, params) => (fn_name, params),
+            Expression::Call(fn_name, params) => (fn_name, params),
             _ => {
                 return Err(CompilerError::Unknown);
             }
@@ -1077,7 +1136,7 @@ impl Compiler {
         if params.len() != fn_arg_req_len {
             return Err(CompilerError::InvalidArgumentCount);
         }
-        let mut call_stack_diff = 0;
+
         for (i, (var_name, var_type)) in fn_args.iter() {
             let arg_type = {
                 let checker = Checker::new(self);
@@ -1087,20 +1146,30 @@ impl Compiler {
             if arg_type != *var_type {
                 return Err(CompilerError::TypeMismatch);
             }
-            call_stack_diff += self.size_of_type(var_type)?;
             self.compile_expr(&params[*i])?;
         }
+        //println!("Compiling empty call expr: call {}", fn_name);
+
         let call_instr = Instruction::new(Opcode::CALL)
             .with_operand(&fn_uid);
         self.builder.push_instr(call_instr);
 
         let size = self.size_of_type(&fn_ret_type)?;
+        
+
+        //println!("Compiling statement call expr: fn {} discarding return stack size of {} ", fn_name, size);
+
+        if size > 0 {
+            //println!("Adding POPN instruction");
+            let popn_instr = Instruction::new(Opcode::POPN)
+                .with_operand(&(size as u64));
+            self.builder.push_instr(popn_instr);
+        }
 
         let front_context = self.fn_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
-        
-        front_context.stack_size += call_stack_diff;
-        front_context.stack_size += size;
+
+        //println!("Stack size after call expr: {}", front_context.stack_size);
 
         Ok(())
     }
@@ -1248,22 +1317,31 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_var_assign_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
-        let (var_name, expr) = match stmt {
-            Statement::Assignment(name, assign) => (name, assign),
+    pub fn compile_var_assign_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        let (var_expr, assign_expr) = match expr {
+            Expression::Assign(var_expr, assign_expr) => (var_expr, assign_expr),
             _ => return Err(CompilerError::Unknown)
         };
 
+        let var_name;
+        if let Expression::Variable(name) = var_expr.deref() {
+            var_name = name.clone();
+        } else {
+            return Err(CompilerError::Unknown);
+        }
+
+        //println!("Compiling var assign: var {} = {:?}", var_name, assign_expr);
+
         let var_type = self.type_of_var(&var_name)?;
         let checker = Checker::new(&self);
-        let expr_type = checker.check_expr_type(&expr)
+        let expr_type = checker.check_expr_type(&assign_expr)
             .map_err(|_| CompilerError::TypeMismatch)?;
 
         if expr_type != var_type {
             return Err(CompilerError::TypeMismatch);
         }
 
-        self.compile_expr(&expr)?;
+        self.compile_expr(&assign_expr)?;
         
         let var_offset = {
             let front_context = self.fn_context_stack.get(0)
@@ -1284,6 +1362,14 @@ impl Compiler {
                 front_context.stack_size -= 8;
                 //println!"Stack size after MOVI: {}", front_context.stack_size);
                 Instruction::new(Opcode::SMOVI)
+                    .with_operand(&var_offset)
+            },
+            Type::Float => {
+                let front_context = self.fn_context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size -= 4;
+                //println!"Stack size after MOVI: {}", front_context.stack_size);
+                Instruction::new(Opcode::SMOVF)
                     .with_operand(&var_offset)
             },
             _ => {
@@ -1351,6 +1437,7 @@ impl Compiler {
     }
 
     pub fn compile_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        //println!("Compiling expression: {:?}", expr);
         match expr {
             Expression::IntLiteral(int) => {
                 let pushi_instr = Instruction::new(Opcode::PUSHI)
@@ -1371,18 +1458,27 @@ impl Compiler {
             Expression::StringLiteral(string) => {
                 // Trim trailing ""
                 let string = String::from(&string[1..string.len()-1]);
-                let addr = {
+                let (size, addr) = {
                     self.data.add_string(&string)
                 };
+                //println!("Got data string literal \"{}\" with size {}!", string, size);
+                let size_instr = Instruction::new(Opcode::PUSHA)
+                    .with_operand(&size);
                 let pusha_instr = Instruction::new(Opcode::PUSHA)
                     .with_operand(&addr);
+                self.builder.push_instr(size_instr);
                 self.builder.push_instr(pusha_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size += 8;
+                front_context.stack_size += 16;
             },
             Expression::FloatLiteral(float) => {
-                return Err(CompilerError::NotImplemented);
+                let pushi_instr = Instruction::new(Opcode::PUSHF)
+                    .with_operand(float);
+                self.builder.push_instr(pushi_instr);
+                let front_context = self.fn_context_stack.get_mut(0)
+                    .ok_or(CompilerError::Unknown)?;
+                front_context.stack_size += 4;
             },
             Expression::Call(_, _) => {
                 self.compile_call_expr(expr)?;
@@ -1403,16 +1499,22 @@ impl Compiler {
                         Instruction::new(Opcode::SDUPI)
                             .with_operand(&var_offset)
                     },
-                    Type::String => {
-                        Instruction::new(Opcode::SDUPA)
+                    Type::Float => {
+                        //println!("Compiling SDUPF");
+                        Instruction::new(Opcode::SDUPF)
                             .with_operand(&var_offset)
+                    },
+                    Type::String => {
+                        Instruction::new(Opcode::SDUPN)
+                            .with_operand(&var_offset)
+                            .with_operand::<u64>(&16)
                     },
                     _ => return Err(CompilerError::NotImplemented)  
                 };
                 //println!("dup instruction for var expr: {:?}", dup_instr);
                 self.builder.push_instr(dup_instr);
                 let var_size = self.size_of_type(&var_type)?;
-                //println!"Compiling var expr. size: {}", var_size);
+                //println!("Compiling var expr. size: {}", var_size);
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size += var_size;
@@ -1420,42 +1522,114 @@ impl Compiler {
             Expression::Addition(lhs, rhs) => {
                 self.compile_expr(lhs)?;
                 self.compile_expr(rhs)?;
-                let addi_instr = Instruction::new(Opcode::ADDI);
-                self.builder.push_instr(addi_instr);
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 16;
-                front_context.stack_size += 8;
+                let var_type = {
+                    let checker = Checker::new(self);
+                    checker.check_expr_type(lhs)
+                        .map_err(|_| CompilerError::TypeMismatch)?
+                };
+                match var_type {
+                    Type::Int => {
+                        let addi_instr = Instruction::new(Opcode::ADDI);
+                        self.builder.push_instr(addi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 8;
+                    },
+                    Type::Float => {
+                        let addf_instr = Instruction::new(Opcode::ADDF);
+                        self.builder.push_instr(addf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 4;
+                    },
+                    _ => unimplemented!("Addition for non-numbers")
+                };
             },
             Expression::Subtraction(lhs, rhs) => {
                 self.compile_expr(lhs)?;
                 self.compile_expr(rhs)?;
-                let subi_instr = Instruction::new(Opcode::SUBI);
-                self.builder.push_instr(subi_instr);
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 16;
-                front_context.stack_size += 8;
+                let var_type = {
+                    let checker = Checker::new(self);
+                    checker.check_expr_type(lhs)
+                        .map_err(|_| CompilerError::TypeMismatch)?
+                };
+                match var_type {
+                    Type::Int => {
+                        let subi_instr = Instruction::new(Opcode::SUBI);
+                        self.builder.push_instr(subi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 8;
+                    },
+                    Type::Float => {
+                        let subf_instr = Instruction::new(Opcode::SUBF);
+                        self.builder.push_instr(subf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 4;
+                    },
+                    _ => unimplemented!("Subtraction for non-numbers")
+                };
             },
             Expression::Multiplication(lhs, rhs) => {
                 self.compile_expr(lhs)?;
                 self.compile_expr(rhs)?;
-                let muli_instr = Instruction::new(Opcode::MULI);
-                self.builder.push_instr(muli_instr);
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 16;
-                front_context.stack_size += 8;
+                let var_type = {
+                    let checker = Checker::new(self);
+                    checker.check_expr_type(lhs)
+                        .map_err(|_| CompilerError::TypeMismatch)?
+                };
+                match var_type {
+                    Type::Int => {
+                        let muli_instr = Instruction::new(Opcode::MULI);
+                        self.builder.push_instr(muli_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 8;
+                    },
+                    Type::Float => {
+                        let mulf_instr = Instruction::new(Opcode::MULF);
+                        self.builder.push_instr(mulf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 4;
+                    },
+                    _ => unimplemented!("Multiplication for non-numbers")
+                };
             },
             Expression::Division(lhs, rhs) => {
                 self.compile_expr(lhs)?;
                 self.compile_expr(rhs)?;
-                let divi_instr = Instruction::new(Opcode::DIVI);
-                self.builder.push_instr(divi_instr);
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 16;
-                front_context.stack_size += 8;
+                let var_type = {
+                    let checker = Checker::new(self);
+                    checker.check_expr_type(lhs)
+                        .map_err(|_| CompilerError::TypeMismatch)?
+                };
+                match var_type {
+                    Type::Int => {
+                        let divi_instr = Instruction::new(Opcode::DIVI);
+                        self.builder.push_instr(divi_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 16;
+                        front_context.stack_size += 8;
+                    },
+                    Type::Float => {
+                        let divf_instr = Instruction::new(Opcode::DIVF);
+                        self.builder.push_instr(divf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 4;
+                    },
+                    _ => unimplemented!("Division for non-numbers")
+                };
             },
             Expression::Equals(lhs, rhs) => {
                 let checker = Checker::new(self);
@@ -1472,6 +1646,14 @@ impl Compiler {
                         front_context.stack_size -= 16;
                         front_context.stack_size += 1;
                     },
+                    Type::Float => {
+                        let eqf_instr = Instruction::new(Opcode::EQF);
+                        self.builder.push_instr(eqf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 1;
+                    },
                     _ => return Err(CompilerError::NotImplemented)
                 };
             },
@@ -1485,9 +1667,19 @@ impl Compiler {
                     Type::Int => {
                         let eqi_instr = Instruction::new(Opcode::EQI);
                         self.builder.push_instr(eqi_instr);
+                        self.builder.push_instr(Instruction::new(Opcode::NOT));
                         let front_context = self.fn_context_stack.get_mut(0)
                             .ok_or(CompilerError::Unknown)?;
                         front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    Type::Float => {
+                        let eqf_instr = Instruction::new(Opcode::EQF);
+                        self.builder.push_instr(eqf_instr);
+                        self.builder.push_instr(Instruction::new(Opcode::NOT));
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
                         front_context.stack_size += 1;
                     },
                     _ => return Err(CompilerError::NotImplemented)
@@ -1513,6 +1705,14 @@ impl Compiler {
                         front_context.stack_size -= 16;
                         front_context.stack_size += 1;
                     },
+                    Type::Float => {
+                        let gtf_instr = Instruction::new(Opcode::GTF);
+                        self.builder.push_instr(gtf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 1;
+                    },
                     _ => return Err(CompilerError::NotImplemented)
                 };
             },
@@ -1529,6 +1729,14 @@ impl Compiler {
                         let front_context = self.fn_context_stack.get_mut(0)
                             .ok_or(CompilerError::Unknown)?;
                         front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    Type::Float => {
+                        let gteqf_instr = Instruction::new(Opcode::GTEQF);
+                        self.builder.push_instr(gteqf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
                         front_context.stack_size += 1;
                     },
                     _ => return Err(CompilerError::NotImplemented)
@@ -1549,6 +1757,14 @@ impl Compiler {
                         front_context.stack_size -= 16;
                         front_context.stack_size += 1;
                     },
+                    Type::Float => {
+                        let ltf_instr = Instruction::new(Opcode::LTF);
+                        self.builder.push_instr(ltf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        front_context.stack_size += 1;
+                    },
                     _ => return Err(CompilerError::NotImplemented)
                 };
             },
@@ -1565,6 +1781,14 @@ impl Compiler {
                         let front_context = self.fn_context_stack.get_mut(0)
                             .ok_or(CompilerError::Unknown)?;
                         front_context.stack_size -= 16;
+                        front_context.stack_size += 1;
+                    },
+                    Type::Float => {
+                        let lteqf_instr = Instruction::new(Opcode::LTEQF);
+                        self.builder.push_instr(lteqf_instr);
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
                         front_context.stack_size += 1;
                     },
                     _ => return Err(CompilerError::NotImplemented)

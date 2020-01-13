@@ -11,7 +11,7 @@ use std::{
 pub struct Data {
     raw_data: Vec<u8>,
     pointers: BTreeMap<usize, Range<usize>>,
-    strings: HashMap<String, usize>
+    strings: HashMap<String, (usize, usize)>
 }
 
 impl Data {
@@ -23,16 +23,17 @@ impl Data {
         }
     }
 
-    pub fn add_string(&mut self, string: &String) -> usize {
-        if let Some(addr) = self.strings.get(string) {
-            return addr.clone();
+    pub fn add_string(&mut self, string: &String) -> (usize, usize) {
+        if let Some(tup) = self.strings.get(string) {
+            return tup.clone();
         }
         let addr = self.raw_data.len();
         let mut data = Vec::from(string.as_bytes());
         let len = data.len();
         self.raw_data.append(&mut data);
         self.pointers.insert(addr, addr..addr+len);
-        addr
+        self.strings.insert(string.clone(), (len, addr));
+        (len, addr)
     }
 
     pub fn get_bytes(&self) -> Vec<u8> {

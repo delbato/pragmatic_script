@@ -52,7 +52,7 @@ use serde::{
 
 pub struct Engine {
     core: Core,
-    compiler: Compiler
+    pub compiler: Compiler
 }
 
 pub type EngineResult<T> = Result<T, Box<EngineError>>;
