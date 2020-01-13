@@ -21,7 +21,7 @@ For no real reason, except the following:
 ## Goals
 
 Some of my goals with this are:
-* [ ] Should be able to run basic algorithms (eg, fibonacci)
+* [x] Should be able to run basic algorithms (eg, fibonacci)
 * [x] Should be able to call rust functions
 * [ ] Should offer an easy API for embedding
 * [ ] Replace languages like Python for shell scripting
@@ -31,15 +31,15 @@ Some of my goals with this are:
 ## Current status/TODO
 
 * [x] Handles integer arithmetic
+* [x] Handles float arithmetics
 * [x] Structure scripts into (sub)modules
-* [x] PARTIAL: Supports calling functions (see FN#1)
-* [x] PARTIAL: Handles float arithmetics (see FN#2)
-* [x] Supports string handling (see FN#5)
+* [x] Supports calling functions
+* [x] Supports string handling
 * [x] Supports simple conditionals (if without else)
 * [ ] Supports complex conditionals (if/elseif/else, switch/case...)
-* [x] PARTIAL: Supports loops (loop, while, for etc...) (see FN#4)
-* [x] PARTIAL: Supports custom types (Containers) (see FN#3)
-* [x] Supports calling rust functions (see FN#6)
+* [ ] PARTIAL: Supports loops (loop, while, for etc...) (see FN#1)
+* [ ] PARTIAL: Supports custom types (Containers) (see FN#2)
+* [x] Supports calling rust functions (see FN#3)
 * [ ] Supports embedding/exposing rust native types
 
 ## Design
@@ -67,7 +67,7 @@ impl: Vector {
 
 import inner_module::add = add_fn;
 
-fn: main() {
+fn: main() ~ int {
     var lhs: int = 1;
     var rhs: int = 2;
     return add_fn(lhs, rhs);
@@ -75,11 +75,6 @@ fn: main() {
 ```
 
 ## Footnotes
-
-1. The interpreter already handles function calls correctly, but  
-    the compiler doesnt fully support call compilation yet (see unit tests)
-2. Float arithmetics are "disabled" right now - making them work would be trivial
-3. Currently implementing.
-4. Currently implementing - "while" and "loop" seem to compile fine, but havent been tested to run
-5. Incomplete: I want to change how the engine stores and handles strings (and their literals)
-6. Incomplete: I want to change the low level interface of calling foreign functions
+1. Currently implementing - "while" and "loop" seem to compile fine, but havent been tested to run
+2. Currently implementing
+3. Incomplete: I want to change the low level interface of calling foreign functions
