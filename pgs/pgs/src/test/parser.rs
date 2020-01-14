@@ -496,3 +496,28 @@ fn test_parse_stmt_expr() {
     let stmt_list_res = parser.parse_statement_list(&mut lexer);
     assert!(stmt_list_res.is_ok());
 }
+
+#[test]
+fn test_parse_cont_impl() {
+    let code = String::from("
+        cont: Vector {
+            x: float;
+            y: float;
+        }
+        impl: Vector {
+            fn: len(&self) ~ float {
+                return 1.0;
+            }
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[Token::CloseBlock]);
+    assert!(decl_list_res.is_ok());
+
+    for decl in decl_list_res.unwrap() {
+        println!("{:?}", decl);
+    }
+}

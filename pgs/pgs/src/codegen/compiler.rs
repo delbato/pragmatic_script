@@ -69,7 +69,8 @@ pub struct Compiler {
     function_uid_set: HashSet<u64>,
     foreign_function_set: HashSet<u64>,
     loop_uid_set: HashSet<u64>,
-    tag_set: HashSet<u64>
+    tag_set: HashSet<u64>,
+    current_cont: String
 }
 
 pub type CompilerResult<T> = Result<T, CompilerError>;
@@ -81,6 +82,8 @@ pub enum CompilerError {
     UnknownFunction,
     UnknownModule,
     UnknownContainer,
+    UnknownContainerFunction,
+    UnknownMemberFunction,
     NotImplemented,
     UnknownVariable,
     TypeMismatch,
@@ -92,7 +95,8 @@ pub enum CompilerError {
     WhileOnlyAcceptsBooleanExpressions,
     ExpectedBreak,
     ExpectedContinue,
-    UnsupportedStatementExpression
+    UnsupportedStatementExpression,
+    OnlyFunctionsAllowedInContImpl
 }
 
 impl Display for CompilerError {
@@ -117,7 +121,8 @@ impl Compiler {
             foreign_function_set: HashSet::new(),
             loop_uid_set: HashSet::new(),
             tag_set: HashSet::new(),
-            data: Data::new()
+            data: Data::new(),
+            current_cont: String::new()
         };
         comp
     }
@@ -621,6 +626,10 @@ impl Compiler {
             full_fn_name += "::";
         }
 
+        if !self.current_cont.is_empty() {
+            full_fn_name += &self.current_cont;
+        }
+
         full_fn_name += function_name;
 
         full_fn_name
@@ -633,9 +642,6 @@ impl Compiler {
 
     /// Pre-Declare a declaration list
     pub fn decl_decl_list(&mut self, decl_list: &Vec<Declaration>) -> CompilerResult<()> {
-        let mod_name = {
-            self.get_current_module()?.name.clone()
-        };
         ////println!"Declaring decl list for current module {}...", mod_name);
         for decl in decl_list.iter() {
             self.decl_decl(decl)?;
@@ -651,8 +657,45 @@ impl Compiler {
             Declaration::Module(_, _) => self.decl_mod_decl(decl)?,
             Declaration::Container(_) => self.decl_cont_decl(decl)?,
             Declaration::Import(_, _) => self.decl_import_decl(decl)?,
+            Declaration::Impl(_, _, _) => self.decl_impl_decl(decl)?,
             _ => {}
         };
+        Ok(())
+    }
+
+    pub fn decl_impl_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
+        let (impl_type, impl_for, decl_list) = match decl {
+            Declaration::Impl(impl_type, impl_for, decl_list) => (impl_type, impl_for, decl_list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let cont_declared = {
+            self.get_current_module()?
+                .containers
+                .get(impl_type)
+                .is_some()
+        };
+        if !cont_declared {
+            let mod_ctx = self.get_current_module_mut()?;
+            let container_def = ContainerDef::new(impl_type.clone());
+            mod_ctx.containers.insert(impl_type.clone(), container_def);
+        }
+        self.current_cont = impl_type.clone();
+
+        self.decl_cont_decl_list(&decl_list)?;
+
+        self.current_cont = String::new();
+
+        Ok(())
+    }
+
+    pub fn decl_cont_decl_list(&mut self, decl_list: &[Declaration]) -> CompilerResult<()> {
+        for decl in decl_list.iter() {
+            match decl {
+                Declaration::Function(_) => self.decl_fn_decl(decl)?,
+                _ => return Err(CompilerError::OnlyFunctionsAllowedInContImpl)
+            };
+        }
         Ok(())
     }
 
@@ -684,20 +727,20 @@ impl Compiler {
         let full_fn_name = self.get_full_function_name(&fn_decl_args.name);
         let uid = self.get_function_uid(&full_fn_name);
 
-        let mod_name = {
-            self.get_current_module()?.name.clone()
-        };
-
-        ////println!"Declaring function {} with uid {} for current module {}!", fn_decl_args.name, uid, mod_name);
-
         let fn_tuple = (uid, fn_decl_args.returns.clone(), fn_decl_args.arguments.clone());
 
         let front_mod_ctx = self.mod_context_stack.get_mut(0)
             .ok_or(CompilerError::Unknown)?;
         
-        let insert_opt = front_mod_ctx.functions.insert(fn_decl_args.name.clone(), fn_tuple);
-        if insert_opt.is_some() {
-            return Err(CompilerError::DuplicateFunctionName);
+        if self.current_cont.is_empty() {
+            let insert_opt = front_mod_ctx.functions.insert(fn_decl_args.name.clone(), fn_tuple);
+            if insert_opt.is_some() {
+                return Err(CompilerError::DuplicateFunctionName);
+            }
+        } else {
+            let container_def = front_mod_ctx.containers.get_mut(&self.current_cont)
+                .ok_or(CompilerError::UnknownContainer)?;
+            container_def.add_function(fn_decl_args.name.clone(), fn_tuple)?;
         }
 
         Ok(())
@@ -710,19 +753,20 @@ impl Compiler {
         };
 
         let cont_name = cont_decl_args.name.clone();
-        
-        let front_mod_ctx = self.mod_context_stack.get_mut(0)
-            .ok_or(CompilerError::Unknown)?;
 
-        let mut container = ContainerDef::new(cont_name.clone());
+        let mod_ctx = self.get_current_module_mut()?;
+
+        if !mod_ctx.containers.contains_key(&cont_name) {
+            let container = ContainerDef::new(cont_name.clone());
+            mod_ctx.containers.insert(cont_name.clone(), container);
+        }
+
+        let container = mod_ctx.containers.get_mut(&cont_name)
+            .ok_or(CompilerError::UnknownContainer)?;
+
         for (i, (var_name, var_type)) in cont_decl_args.members.iter() {
             let member = ContainerMemberDef::new(var_name.clone(), var_type.clone());
             container.members.insert(*i, member);
-        }
-
-        let insert_opt = front_mod_ctx.containers.insert(cont_name, container);
-        if insert_opt.is_some() {
-            return Err(CompilerError::DuplicateStruct);
         }
 
         Ok(())
@@ -785,10 +829,28 @@ impl Compiler {
             },
             Declaration::Import(_, _) => {},
             Declaration::Container(_) => {},
+            Declaration::Impl(_, _, _) => {
+                self.compile_impl_decl(decl)?;
+            },
             _ => {
                 return Err(CompilerError::Unknown);
             }
         };
+        Ok(())
+    }
+
+    pub fn compile_impl_decl(&mut self, decl: Declaration) -> CompilerResult<()> {
+        let (impl_type, impl_for, decl_list) = match decl {
+            Declaration::Impl(impl_type, impl_for, decl_list) => (impl_type, impl_for, decl_list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        self.current_cont = impl_type.clone();
+
+        self.compile_decl_list(decl_list)?;
+
+        self.current_cont = String::new();
+
         Ok(())
     }
 
@@ -820,7 +882,7 @@ impl Compiler {
             self.compile_statement_list(&statements)?;
         }
 
-        let ctx = self.fn_context_stack.pop_front();
+        let _ = self.fn_context_stack.pop_front();
 
         //println!("Fn decl context: {:?}", ctx);
 
@@ -1436,6 +1498,103 @@ impl Compiler {
         Ok(())
     }
 
+    pub fn compile_member_access_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        let (lhs, rhs) = match  expr {
+            Expression::MemberAccess(lhs, rhs) => (lhs, rhs),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let var_name = match lhs.deref() {
+            Expression::Variable(var_name) => var_name,
+            _ => return Err(CompilerError::NotImplemented)
+        };
+
+        let var_type = self.type_of_var(var_name)?;
+        let is_ref;
+
+        let cont_name = match var_type {
+            Type::Other(cont_name) => {
+                is_ref = false;
+                cont_name.clone()
+            },
+            Type::Reference(t) => {
+                is_ref = true;
+                let ret;
+                if let Type::Other(cont_name) = t.deref() {
+                    ret = cont_name.clone();
+                } else {
+                    return Err(CompilerError::Unknown);
+                }
+                ret
+            },
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let cont_def = self.resolve_cont(&cont_name)?;
+
+        match rhs.deref() {
+            Expression::Call(name, args) => {
+                let (fn_uid, fn_ret_type, fn_args) = cont_def.get_function(name)?;
+                let fn_arg_len = fn_args.len();
+                let (first_arg_name, first_arg_type) = fn_args.get(&0)
+                    .ok_or(CompilerError::UnknownFunction)?;
+                if first_arg_name == "self" {
+                    if let Type::Reference(inner) = first_arg_type {
+                        if let Type::Other(inner_cont_name) = inner.deref() {
+                            if inner_cont_name == &cont_name {
+                                if is_ref {
+                                    let var_offset = {
+                                        let front_context = self.fn_context_stack.get(0)
+                                            .ok_or(CompilerError::Unknown)?;
+                                        front_context.offset_of(var_name)
+                                            .ok_or(CompilerError::UnknownVariable)?
+                                    };
+                                    let sref_instr = Instruction::new(Opcode::SDUPA)
+                                        .with_operand(&var_offset);
+                                    self.builder.push_instr(sref_instr);
+                                    let front_ctx = self.fn_context_stack.get_mut(0)
+                                    .   ok_or(CompilerError::Unknown)?;
+                                    front_ctx.stack_size += 8;
+                                } else {
+                                    let var_offset = {
+                                        let front_context = self.fn_context_stack.get(0)
+                                            .ok_or(CompilerError::Unknown)?;
+                                        front_context.offset_of(var_name)
+                                            .ok_or(CompilerError::UnknownVariable)?
+                                    };
+
+                                    let sref_instr = Instruction::new(Opcode::SREF)
+                                        .with_operand(&var_offset);
+                                    self.builder.push_instr(sref_instr);
+                                    let front_ctx = self.fn_context_stack.get_mut(0)
+                                    .   ok_or(CompilerError::Unknown)?;
+                                    front_ctx.stack_size += 8;
+                                }
+                            } else {
+                                return Err(CompilerError::UnknownMemberFunction);
+                            }
+                        } else {
+                            return Err(CompilerError::UnknownMemberFunction);      
+                        }
+                    } else {
+                        return Err(CompilerError::UnknownMemberFunction);
+                    }
+                } else {
+                    return Err(CompilerError::UnknownMemberFunction);
+                }
+
+                for i in 1..fn_arg_len {
+                    let (fn_arg_name, fn_args) = fn_args.get(&i)
+                        .ok_or(CompilerError::Unknown)?;
+                }
+            },
+            Expression::Variable(name) => {},
+            _ => return Err(CompilerError::UnknownVariable)
+        };
+        
+        Ok(())
+    }
+
     pub fn compile_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
         //println!("Compiling expression: {:?}", expr);
         match expr {
@@ -1518,6 +1677,9 @@ impl Compiler {
                 let front_context = self.fn_context_stack.get_mut(0)
                     .ok_or(CompilerError::Unknown)?;
                 front_context.stack_size += var_size;
+            },
+            Expression::MemberAccess(_, _) => {
+                self.compile_member_access_expr(expr)?;
             },
             Expression::Addition(lhs, rhs) => {
                 self.compile_expr(lhs)?;

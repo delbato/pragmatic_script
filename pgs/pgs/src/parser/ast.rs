@@ -153,7 +153,8 @@ pub enum Declaration {
     Function(FunctionDeclArgs),
     Module(String, Vec<Declaration>),
     Container(ContainerDeclArgs),
-    Import(String, String)
+    Import(String, String),
+    Impl(String, String, Vec<Declaration>)
 }
 
 #[derive(PartialEq, Debug, Clone)]

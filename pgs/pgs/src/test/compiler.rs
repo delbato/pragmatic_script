@@ -675,3 +675,42 @@ fn test_compile_while_stmt_list() {
 
     //println!("Code length: {}", compiler.get_builder_ref().get_current_offset());
 }
+
+#[test]
+fn test_compile_cont_impl() {
+    let code = String::from("
+        cont: Vector {
+            x: float;
+            y: float;
+        }
+        impl: Vector {
+            fn: len(&self) ~ float {
+                return 1.0;
+            }
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[Token::CloseBlock]);
+    assert!(decl_list_res.is_ok());
+
+    let decl_list = decl_list_res.unwrap();
+
+    for decl in decl_list.iter() {
+        println!("{:?}", decl);
+    }
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let comp_res = compiler.compile_decl_list(decl_list);
+    assert!(comp_res.is_ok());
+
+    for instr in compiler.get_builder_ref().instructions.iter() {
+        println!("{:?}", instr);
+    }
+}

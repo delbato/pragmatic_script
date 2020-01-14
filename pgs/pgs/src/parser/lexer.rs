@@ -32,6 +32,10 @@ pub enum Token {
     #[prio = 1]
     Import,
 
+    #[token = "impl"]
+    #[prio = 1]
+    Impl,
+
     #[token = "int"]
     #[prio = 1]
     Int,

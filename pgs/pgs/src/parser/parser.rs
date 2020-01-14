@@ -22,7 +22,8 @@ use std::{
         Result as FmtResult
     },
     error::Error,
-    ops::Range
+    ops::Range,
+    cell::RefCell
 };
 
 use pglex::prelude::Lexable;
@@ -63,7 +64,11 @@ pub enum ParseErrorType {
     ExpectedImport,
     ExpectedImportString,
     ExpectedMod,
-    ExpectedIf
+    ExpectedIf,
+    ExpectedImpl,
+    ExpectedImplType,
+    ExpectedSelf,
+    SelfOnlyAllowedInImpls
 }
 
 #[derive(Debug)]
@@ -99,6 +104,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 pub struct Parser {
     code: String,
+    current_cont: RefCell<String>
 }
 
 fn is_op(token: &Token) -> bool {
@@ -186,7 +192,8 @@ fn is_op_right_assoc(token: &Token) -> bool {
 impl Parser {
     pub fn new(code: String) -> Self {
         Parser {
-            code: code
+            code: code,
+            current_cont: RefCell::new(String::new())
         }
     }
 
@@ -209,6 +216,9 @@ impl Parser {
                 Token::Mod => {
                     ret.push(self.parse_mod_decl(lexer)?);
                 },
+                Token::Impl => {
+                    ret.push(self.parse_impl_decl(lexer)?);
+                },
                 _ => {
                     return Err(ParseError::new(ParseErrorType::ExpectedMod, lexer.range()));
                 }
@@ -216,6 +226,59 @@ impl Parser {
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_impl_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
+        if lexer.token != Token::Impl {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedImpl);
+        }
+
+        // Swallow "impl"
+        lexer.advance();
+
+        if lexer.token != Token::Colon {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedColon);
+        }
+
+        // Swallow ":"
+        lexer.advance();
+
+        if lexer.token != Token::Text {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedImplType);
+        }
+
+        let impl_type = String::from(lexer.slice());
+        let mut impl_for = impl_type.clone();
+
+        // Swallow impl type
+        lexer.advance();
+
+        if lexer.token == Token::For {
+            // Swallow "for" if its next
+            lexer.advance();
+
+            impl_for = String::from(lexer.slice());
+
+            // Swallow impl for type
+            lexer.advance();
+        }
+
+        if lexer.token != Token::OpenBlock {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
+        }
+
+        // Swallow "}"
+        lexer.advance();
+
+        *(self.current_cont.borrow_mut()) = impl_type.clone();
+
+        let decl_list = self.parse_decl_list(lexer, &[Token::CloseBlock])?;
+
+        *(self.current_cont.borrow_mut()) = String::new();
+
+        Ok(
+            Declaration::Impl(impl_type, impl_for, decl_list)
+        )
     }
 
     pub fn parse_root_decl_list(&self) -> ParseResult<Vec<Declaration>> {
@@ -456,6 +519,25 @@ impl Parser {
 
     pub fn parse_fn_arg(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
         let mut lexer_backup = lexer.clone();
+        
+        // Special case for argument "self"
+        if lexer.token == Token::And {
+            // Swallow "&"
+            lexer.advance();
+            if lexer.token != Token::Text || lexer.slice() != "self" {
+                return make_parse_error!(lexer, ParseErrorType::ExpectedSelf);
+            }
+            
+            let arg_name = String::from("self");
+            let cont_name = self.current_cont.borrow().clone();
+            if cont_name.is_empty() {
+                return make_parse_error!(lexer, ParseErrorType::SelfOnlyAllowedInImpls);
+            }
+            let arg_type = Type::Reference(Box::new(Type::Other(cont_name)));
+
+            return Ok((arg_name, arg_type));
+        }
+
         if lexer.token != Token::Text {
             return Err(ParseError::new(ParseErrorType::ExpectedArgName, lexer.range()));
         }

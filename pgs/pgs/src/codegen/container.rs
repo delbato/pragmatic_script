@@ -15,14 +15,16 @@ use crate::{
 
 use std::{
     collections::{
-        BTreeMap
+        BTreeMap,
+        HashMap
     }
 };
 
 #[derive(Debug, Clone)]
 pub struct ContainerDef {
     pub name: String,
-    pub members: BTreeMap<usize, ContainerMemberDef> 
+    pub members: BTreeMap<usize, ContainerMemberDef>,
+    pub functions: HashMap<String, (u64, Type, BTreeMap<usize, (String, Type)>)>
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +37,8 @@ impl ContainerDef {
     pub fn new(name: String) -> ContainerDef {
         ContainerDef {
             name: name,
-            members: BTreeMap::new()
+            members: BTreeMap::new(),
+            functions: HashMap::new()
         }
     }
 
@@ -66,6 +69,20 @@ impl ContainerDef {
     pub fn add_member(&mut self, member: ContainerMemberDef) {
         let index = self.members.len();
         self.members.insert(index, member);
+    }
+
+    pub fn add_function(&mut self, name: String, fn_tuple: (u64, Type, BTreeMap<usize, (String, Type)>)) -> CompilerResult<()> {
+        let insert_opt = self.functions.insert(name, fn_tuple);
+        if insert_opt.is_some() {
+            return Err(CompilerError::DuplicateFunctionName);
+        }
+        Ok(())
+    }
+
+    pub fn get_function(&self, name: &String) -> CompilerResult<(u64, Type, BTreeMap<usize, (String, Type)>)> {
+        self.functions.get(name)
+            .cloned()
+            .ok_or(CompilerError::UnknownContainerFunction)
     }
 }
 
