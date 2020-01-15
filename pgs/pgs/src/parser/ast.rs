@@ -12,6 +12,7 @@ pub enum Expression {
     StringLiteral(String),
     BoolLiteral(bool),
     Variable(String),
+    ContainerInstance(String, HashMap<String, Expression>),
     MemberAccess(Box<Expression>, Box<Expression>),
     Deref(Box<Expression>),
     Ref(Box<Expression>),
@@ -169,7 +170,7 @@ pub enum Statement {
     VariableDecl(VariableDeclArgs),
     Assignment(String, Box<Expression>),
     Call(String, Vec<Expression>),
-    Return(Box<Expression>),
+    Return(Option<Expression>),
     Loop(Vec<Statement>),
     While(Box<Expression>, Vec<Statement>),
     Break,
@@ -182,6 +183,7 @@ pub enum Statement {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Type {
+    Void,
     Int,
     String,
     Float,

@@ -1,7 +1,7 @@
 import std::printi;
 import std::println;
 
-fn: main(arg: int) ~ int {
+fn: main(arg: int) {
     var until: int = arg;
     var i: int = 0;
     while i < until {
@@ -9,5 +9,4 @@ fn: main(arg: int) ~ int {
         println(" ");
         i += 1;
     }
-    return i;
 }

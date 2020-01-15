@@ -60,6 +60,7 @@ pub enum ParseErrorType {
     ExpectedOpenBlock,
     ExpectedMemberType,
     ExpectedMemberName,
+    ExpectedContainerName,
     DuplicateMember,
     ExpectedImport,
     ExpectedImportString,
@@ -68,7 +69,8 @@ pub enum ParseErrorType {
     ExpectedImpl,
     ExpectedImplType,
     ExpectedSelf,
-    SelfOnlyAllowedInImpls
+    SelfOnlyAllowedInImpls,
+    MalformedImport
 }
 
 #[derive(Debug)]
@@ -211,7 +213,8 @@ impl Parser {
                     ret.push(self.parse_container_decl(lexer)?);
                 },
                 Token::Import => {
-                    ret.push(self.parse_import_decl(lexer)?);
+                    let mut import_decls = self.parse_import_decl(lexer)?;
+                    ret.append(&mut import_decls);
                 },
                 Token::Mod => {
                     ret.push(self.parse_mod_decl(lexer)?);
@@ -326,7 +329,109 @@ impl Parser {
         )
     }
 
-    pub fn parse_import_decl(&self, lexer: &mut Lexer) -> ParseResult<Declaration> {
+    pub fn parse_import_string(&self, lexer: &mut Lexer, delims: &[Token]) -> ParseResult<(String, String)> {
+        let mut import_string = String::new();
+        let mut import_as = String::new();
+
+        while !delims.contains(&lexer.token) {
+            if lexer.token == Token::Times {
+                if import_string.is_empty() {
+                    return make_parse_error!(lexer, ParseErrorType::MalformedImport);
+                }
+                lexer.advance();
+                import_as = String::from("*");
+                continue;
+            }
+
+            if lexer.token != Token::Text {
+                return make_parse_error!(lexer, ParseErrorType::ExpectedImportString);
+            }
+
+            import_string += lexer.slice();
+            import_as = String::from(lexer.slice());
+            lexer.advance();
+
+            if lexer.token != Token::DoubleColon {
+                break;
+            }
+
+            lexer.advance();
+
+            import_string += "::";
+        }
+
+        if import_string.is_empty() {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedImportString);
+        }
+
+        Ok(
+            (import_string, import_as)
+        )
+    }
+
+    pub fn parse_multi_import(&self, lexer: &mut Lexer) -> ParseResult<Vec<Declaration>> {
+        let delims = &[
+            Token::End,
+            Token::Error,
+            Token::CloseBlock,
+            Token::Semicolon
+        ];
+
+        let mut import_decls = Vec::new();
+
+        while !delims.contains(&lexer.token) {
+            let (import_name, mut import_as) = self.parse_import_string(lexer, &[Token::Comma, Token::CloseBlock, Token::OpenBlock, Token::Assign])?;
+            if lexer.token == Token::Comma {
+                lexer.advance();
+            }
+            match lexer.token {
+                Token::Assign => {
+                    lexer.advance();
+                    if lexer.token != Token::Text {
+                        return make_parse_error!(lexer, ParseErrorType::ExpectedImportString);
+                    }
+                    import_as = String::from(lexer.slice());
+                    let decl = Declaration::Import(import_name, import_as);
+                    import_decls.push(decl);
+                    lexer.advance();
+                    if lexer.token == Token::Comma {
+                        lexer.advance();
+                    }
+                },
+                Token::OpenBlock => {
+                    if !import_name.ends_with("::") {
+                        return make_parse_error!(lexer, ParseErrorType::MalformedImport);
+                    }
+                    lexer.advance();
+                    let mut nested_decls = self.parse_multi_import(lexer)?;
+
+                    for decl in nested_decls.iter_mut() {
+                        if let Declaration::Import(decl_name, _) = decl {
+                            let mut new_name = import_name.clone();
+                            new_name += &decl_name;
+                            *decl_name = new_name;
+                        }
+                    }
+
+                    import_decls.append(&mut nested_decls);
+                },
+                _ => {
+                    let decl = Declaration::Import(import_name, import_as);
+                    import_decls.push(decl);
+                }
+            };
+        }
+
+        if lexer.token != Token::CloseBlock && lexer.token != Token::Semicolon {
+            return make_parse_error!(lexer, ParseErrorType::MalformedImport);
+        }
+
+        lexer.advance();
+
+        Ok(import_decls)
+    }
+
+    pub fn parse_import_decl(&self, lexer: &mut Lexer) -> ParseResult<Vec<Declaration>> {
         if lexer.token != Token::Import {
             return Err(ParseError::new(ParseErrorType::ExpectedImport, lexer.range()));
         }
@@ -336,56 +441,17 @@ impl Parser {
 
         let delims = &[
             Token::Semicolon,
+            Token::OpenBlock,
             Token::Assign,
             Token::End,
             Token::Error
         ];
 
-        let mut import_string = String::new();
-        let mut import_string_end = String::new();
-
-        while !delims.contains(&lexer.token) {
-            if lexer.token != Token::Text {
-                return Err(ParseError::new(ParseErrorType::ExpectedImportString, lexer.range()));
-            }
-
-            import_string += lexer.slice();
-            import_string_end = String::from(lexer.slice());
-            // Swallow the name
-            lexer.advance();
-
-            if lexer.token != Token::DoubleColon {
-                break;
-            }
-
-            import_string += "::";
-
-            // Swalow "::"
-            lexer.advance();
-        }
-        let mut import_as = import_string_end;
-        if lexer.token == Token::Assign {
-            // Swallow "="
-            lexer.advance();
-
-            if lexer.token != Token::Text {
-                return Err(ParseError::new(ParseErrorType::ExpectedImportString, lexer.range()));
-            }
-
-            import_as = String::from(lexer.slice());
-            // Swallow import name
-            lexer.advance();
-        }
-
-        if lexer.token != Token::Semicolon {
-            return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
-        }
-
-        // Swallow ";"
-        lexer.advance();
+        
+        let import_decls = self.parse_multi_import(lexer)?;
 
         Ok(
-            Declaration::Import(import_string, import_as)
+            import_decls
         )
     }
 
@@ -425,26 +491,28 @@ impl Parser {
         }
         lexer.advance();
 
-        if lexer.token != Token::Tilde {
-            return Err(ParseError::new(ParseErrorType::ReturnTypeMissing, lexer.range()));
+        let fn_return_type;
+
+        if lexer.token == Token::Tilde {
+            lexer.advance();
+            fn_return_type = match lexer.token {
+                Token::Int => Type::Int,
+                Token::Float => Type::Float,
+                Token::String => Type::String,
+                Token::Bool => Type::Bool,
+                Token::Text => {
+                    let type_name = String::from(lexer.slice());
+                    Type::Other(type_name)
+                },
+                _ => {
+                    return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
+                }
+            };
+
+            lexer.advance();
+        } else {
+            fn_return_type = Type::Void;
         }
-        lexer.advance();
-
-        let fn_return_type = match lexer.token {
-            Token::Int => Type::Int,
-            Token::Float => Type::Float,
-            Token::String => Type::String,
-            Token::Bool => Type::Bool,
-            Token::Text => {
-                let mut type_name = String::from(lexer.slice());
-                Type::Other(type_name)
-            },
-            _ => {
-                return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
-            }
-        };
-
-        lexer.advance();
 
         let code_block_opt;
 
@@ -957,7 +1025,7 @@ impl Parser {
         lexer.advance();
 
         Ok(
-            Statement::Return(Box::new(ret_expr))
+            Statement::Return(Some(ret_expr))
         )
     }
 
@@ -1209,6 +1277,31 @@ impl Parser {
             }
         };
         Ok(expr)
+    }
+
+    pub fn parse_cont_instance(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
+        if lexer.token != Token::Text {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedContainerName);
+        }
+
+        let cont_name = String::from(lexer.slice());
+        // Swallow cont name
+        lexer.advance();
+
+        if lexer.token != Token::OpenBlock {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
+        }
+
+        // Swallow "}"
+        lexer.advance();
+
+        let instance_map = self.parse_cont_instance_content(lexer)?;
+
+        make_parse_error!(lexer, ParseErrorType::Unimplemented)
+    }
+
+    fn parse_cont_instance_content(&self, lexer: &mut Lexer) -> ParseResult<HashMap<String, Expression>> {
+        make_parse_error!(lexer, ParseErrorType::Unimplemented)
     }
 
     pub fn try_parse_call_expr(&self, lexer: &mut Lexer) -> ParseResult<Expression> {

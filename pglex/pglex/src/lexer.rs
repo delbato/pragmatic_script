@@ -62,7 +62,7 @@ impl<'source, T, S> Lexer<T, S>
         let mut begin_pos = self.current_pos;
         let mut matched_in_past = false;
 
-        if begin_pos >= self.source_end {
+        if self.current_pos >= self.source_end {
             self.token_begin = begin_pos;
             self.token_end = begin_pos;
             self.token = T::get_end_variant();

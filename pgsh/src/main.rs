@@ -45,10 +45,14 @@ fn bootstrap_engine(engine: &mut Engine) -> EngineResult<()> {
 
 
 fn build_app<'a>() -> App<'a, 'a> {
-    let mut about_string = "pragmatic_script shell script interpreter";
+    let about_string;
     #[cfg(feature = "static_std")]
     {
         about_string = "pragmatic_script shell script interpreter\npgs_std statically linked";
+    }
+    #[cfg(not(feature = "static_std"))]
+    {
+        about_string = "pragmatic_script shell script interpreter";
     }
 
     App::new("pgsh")
@@ -95,8 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             if int_res.is_ok() {
                 engine.push_stack(int_res.unwrap())?;
-            }
-            if float_res.is_ok() {
+            } else if float_res.is_ok() {
                 engine.push_stack(float_res.unwrap())?;
             }
         }

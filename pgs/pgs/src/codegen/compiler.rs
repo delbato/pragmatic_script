@@ -493,6 +493,7 @@ impl Compiler {
             Type::Float => 4,
             Type::String => 16,
             Type::Bool => 1,
+            Type::Void => 0,
             Type::Reference(inner_type) => match *(*inner_type) {
                 Type::AutoArray(_) => 16,
                 _ => 8
@@ -873,17 +874,29 @@ impl Compiler {
             context.set_var(stack_index - size as i64, (var_name.clone(), var_type.clone()));
             stack_index -= size as i64;
         }
+        
+        let ret_type = fn_decl_args.returns.clone();
 
         context.return_type = Some(fn_decl_args.returns);
 
         self.fn_context_stack.push_front(context);
+        
 
         if let Some(statements) = fn_decl_args.code_block {
             self.compile_statement_list(&statements)?;
+            let mut contains_return = false;
+            for stmt in statements.iter() {
+                if let Statement::Return(_) = stmt {
+                    contains_return = true;
+                }
+            }
+            if ret_type == Type::Void && !contains_return {
+                let return_stmt = Statement::Return(None);
+                self.compile_statement(&return_stmt)?;
+            }
         }
 
         let _ = self.fn_context_stack.pop_front();
-
         //println!("Fn decl context: {:?}", ctx);
 
         Ok(())
@@ -1237,14 +1250,10 @@ impl Compiler {
     }
     
     pub fn compile_return_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
-        let ret_expr = match stmt {
+        let ret_expr_opt = match stmt {
             Statement::Return(expr) => expr,
             _ => return Err(CompilerError::Unknown)
         };
-
-        let checker = Checker::new(&self);
-        let expr_type = checker.check_expr_type(&ret_expr)
-            .map_err(|_| CompilerError::TypeMismatch)?;
 
         let (fn_index, fn_ctx) = self.get_parent_fn()?;
 
@@ -1253,14 +1262,21 @@ impl Compiler {
             .as_ref()
             .ok_or(CompilerError::TypeMismatch)?
             .clone();
+
+        let checker = Checker::new(&self);
+        if ret_expr_opt.is_some() {
+            let ret_expr = ret_expr_opt.as_ref().unwrap();
+            let expr_type = checker.check_expr_type(ret_expr)
+                .map_err(|_| CompilerError::TypeMismatch)?;
         
-        if fn_type != expr_type {
-            return Err(CompilerError::TypeMismatch);
+            if fn_type != expr_type {
+                return Err(CompilerError::TypeMismatch);
+            }
+            self.compile_expr(ret_expr)?;
         }
 
-        self.compile_expr(&ret_expr)?;
-
         let size = self.size_of_type(&fn_type)?;
+        let mut skip_swap = false;
 
         // Save return value to swap space
         let sv_swap_instr = match &fn_type {
@@ -1280,6 +1296,10 @@ impl Compiler {
             Type::Other(_) => {
                 Instruction::new(Opcode::SVSWPN)
                     .with_operand::<u64>(&(size as u64))
+            },
+            Type::Void => {
+                skip_swap = true;
+                Instruction::new(Opcode::NOOP)
             },
             _ => {
                 return Err(CompilerError::Unknown);
@@ -1331,14 +1351,20 @@ impl Compiler {
                 Instruction::new(Opcode::LDSWPN)
                     .with_operand::<u64>(&(size as u64))
             },
+            Type::Void => {
+                skip_swap = true;
+                Instruction::new(Opcode::NOOP)
+            },
             _ => {
                 return Err(CompilerError::Unknown);
             }
         };
-        if stack_size > 0 {
+        if stack_size > 0 && !skip_swap {
             self.builder.push_instr(sv_swap_instr);
             self.builder.push_instr(popn_instr);
             self.builder.push_instr(ld_swap_instr);
+        } else if stack_size > 0 && skip_swap {
+            self.builder.push_instr(popn_instr);
         }
         self.builder.push_instr(Instruction::new(Opcode::RET));
 
@@ -1538,7 +1564,7 @@ impl Compiler {
                 let fn_arg_len = fn_args.len();
                 let (first_arg_name, first_arg_type) = fn_args.get(&0)
                     .ok_or(CompilerError::UnknownFunction)?;
-                if first_arg_name == "self" {
+                if first_arg_name == "this" {
                     if let Type::Reference(inner) = first_arg_type {
                         if let Type::Other(inner_cont_name) = inner.deref() {
                             if inner_cont_name == &cont_name {
@@ -1549,9 +1575,9 @@ impl Compiler {
                                         front_context.offset_of(var_name)
                                             .ok_or(CompilerError::UnknownVariable)?
                                     };
-                                    let sref_instr = Instruction::new(Opcode::SDUPA)
+                                    let sdupa_instr = Instruction::new(Opcode::SDUPA)
                                         .with_operand(&var_offset);
-                                    self.builder.push_instr(sref_instr);
+                                    self.builder.push_instr(sdupa_instr);
                                     let front_ctx = self.fn_context_stack.get_mut(0)
                                     .   ok_or(CompilerError::Unknown)?;
                                     front_ctx.stack_size += 8;
@@ -1570,6 +1596,24 @@ impl Compiler {
                                     .   ok_or(CompilerError::Unknown)?;
                                     front_ctx.stack_size += 8;
                                 }
+                                if args.len() != fn_arg_len - 1 {
+                                    return Err(CompilerError::Unknown);
+                                }
+                                let mut i = 1;
+                                for arg in args.iter() {
+                                    let arg_type = Checker::new(self).check_expr_type(arg)
+                                        .map_err(|_| CompilerError::TypeMismatch)?;
+                                    let (_, req_type) = fn_args.get(&i)
+                                        .ok_or(CompilerError::TypeMismatch)?;
+                                    if arg_type != *req_type {
+                                        return Err(CompilerError::TypeMismatch);
+                                    }
+                                    self.compile_expr(arg)?;
+                                    i += 1;
+                                }
+                                let call_instr = Instruction::new(Opcode::CALL)
+                                    .with_operand(&fn_uid);
+                                self.builder.push_instr(call_instr);
                             } else {
                                 return Err(CompilerError::UnknownMemberFunction);
                             }
@@ -1581,11 +1625,6 @@ impl Compiler {
                     }
                 } else {
                     return Err(CompilerError::UnknownMemberFunction);
-                }
-
-                for i in 1..fn_arg_len {
-                    let (fn_arg_name, fn_args) = fn_args.get(&i)
-                        .ok_or(CompilerError::Unknown)?;
                 }
             },
             Expression::Variable(name) => {},

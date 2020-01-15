@@ -35,6 +35,7 @@ impl<'c> Checker<'c> {
             Expression::FloatLiteral(_) => Type::Float,
             Expression::StringLiteral(_) => Type::String,
             Expression::BoolLiteral(_) => Type::Bool,
+            Expression::ContainerInstance(cont_name, _) => Type::Other(cont_name.clone()),
             Expression::Call(fn_name, _) => {
                 self.compiler.type_of_fn(fn_name)
                     .map_err(|_| CheckerError::TypeMismatch)?

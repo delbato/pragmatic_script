@@ -20,9 +20,63 @@ fn test_parse_import_decl() {
     let decl_res = parser.parse_import_decl(&mut lexer);
     assert!(decl_res.is_ok());
 
-    if let Declaration::Import(import_string, import_name) = decl_res.unwrap() {
-        assert_eq!(import_string, String::from("root::lol::get_fucked"));
-        assert_eq!(import_name, String::from("GetFucked"));
+    let decl_list = decl_res.unwrap();
+
+    if let Declaration::Import(import_string, import_name) = &decl_list[0] {
+        assert_eq!(*import_string, String::from("root::lol::get_fucked"));
+        assert_eq!(*import_name, String::from("GetFucked"));
+    }
+}
+
+#[test]
+fn test_parse_multi_import() {
+    let code = String::from("
+        import std::{
+            printi,
+            println
+        };
+    ");
+
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+
+    let decl_res = parser.parse_import_decl(&mut lexer);
+    assert!(decl_res.is_ok());
+
+    let decl_list = decl_res.unwrap();
+
+    println!("Current token: {:?}", lexer.token);
+
+    assert_eq!(decl_list.len(), 2);
+
+    assert_eq!(decl_list[0], Declaration::Import(String::from("std::printi"), String::from("printi")));
+    assert_eq!(decl_list[1], Declaration::Import(String::from("std::println"), String::from("println")));
+}
+
+#[test]
+fn test_parse_nested_multi_import() {
+    let code = String::from("
+        import std::{
+            printi,
+            println,
+            ext::{
+                malloc = alloc,
+                dealloc,
+                inner::*
+            }
+        };
+    ");
+
+    let mut lexer = Token::lexer(code.as_str());
+    let parser = Parser::new(code.clone());
+
+    let decl_res = parser.parse_import_decl(&mut lexer);
+    assert!(decl_res.is_ok());
+
+    let decl_list = decl_res.unwrap();
+
+    for decl in decl_list {
+        println!("{:?}", decl);
     }
 }
 
