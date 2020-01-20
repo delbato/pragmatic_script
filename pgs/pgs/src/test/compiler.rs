@@ -714,3 +714,30 @@ fn test_compile_cont_impl() {
         println!("{:?}", instr);
     }
 }
+
+#[test]
+fn test_compile_member_unroll() {
+    let code = String::from("
+        engine.structs.x;
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let expr_res = parser.parse_expr(&mut lexer, &[Token::Semicolon]);
+    assert!(expr_res.is_ok());
+
+    let expr = expr_res.unwrap();
+
+    let mut compiler = Compiler::new();
+    compiler.reset_builder();
+    compiler.push_empty_context();
+    compiler.push_default_module_context();
+
+    let unroll_res = compiler.unroll_member_access(&expr);
+    assert!(unroll_res.is_ok());
+
+    for el in unroll_res.unwrap() {
+        println!("{:?}", el);
+    }
+}

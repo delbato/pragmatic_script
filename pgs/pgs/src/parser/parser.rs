@@ -1279,7 +1279,8 @@ impl Parser {
         Ok(expr)
     }
 
-    pub fn parse_cont_instance(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
+    pub fn try_parse_cont_instance(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
+        let lexer_backup = lexer.clone();
         if lexer.token != Token::Text {
             return make_parse_error!(lexer, ParseErrorType::ExpectedContainerName);
         }
@@ -1289,19 +1290,62 @@ impl Parser {
         lexer.advance();
 
         if lexer.token != Token::OpenBlock {
+            *lexer = lexer_backup;
             return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
+        }
+
+        // Swallow "{"
+        lexer.advance();
+
+        let instance_map = self.parse_cont_instance_content(lexer)?;
+
+        if lexer.token != Token::CloseBlock {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedCloseBlock);
         }
 
         // Swallow "}"
         lexer.advance();
 
-        let instance_map = self.parse_cont_instance_content(lexer)?;
-
-        make_parse_error!(lexer, ParseErrorType::Unimplemented)
+        Ok(
+            Expression::ContainerInstance(cont_name, instance_map)
+        )
     }
 
     fn parse_cont_instance_content(&self, lexer: &mut Lexer) -> ParseResult<HashMap<String, Expression>> {
-        make_parse_error!(lexer, ParseErrorType::Unimplemented)
+        let delims = &[
+            Token::CloseBlock,
+            Token::End,
+            Token::Error
+        ];
+
+        let mut ret = HashMap::new();
+
+        while !delims.contains(&lexer.token) {
+            if lexer.token != Token::Text {
+                return make_parse_error!(lexer, ParseErrorType::ExpectedMemberName);
+            }
+
+            let member_name = String::from(lexer.slice());
+            // Swallow member name
+            lexer.advance();
+
+            if lexer.token != Token::Colon {
+                return make_parse_error!(lexer, ParseErrorType::ExpectedColon);
+            }
+
+            // Swallow ":"
+            lexer.advance();
+
+            let member_expr = self.parse_expr(lexer, &[Token::Comma, Token::CloseBlock])?;
+
+            if lexer.token == Token::Comma {
+                lexer.advance();
+            }
+
+            ret.insert(member_name, member_expr);
+        }
+
+        Ok(ret)
     }
 
     pub fn try_parse_call_expr(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
@@ -1405,20 +1449,25 @@ impl Parser {
                 if call_expr_res.is_ok() {
                     expr = call_expr_res.unwrap();
                 } else {
-                    let mut var_name = String::from(lexer.slice());
+                    let cont_inst_expr_res = self.try_parse_cont_instance(lexer);
+                    if cont_inst_expr_res.is_ok() {
+                        expr = cont_inst_expr_res.unwrap();
+                    } else {
+                        let mut var_name = String::from(lexer.slice());
                     
-                    if var_name.len() == 1 {
-                        let lexer_backup = lexer.clone();
-                        lexer.advance();
+                        if var_name.len() == 1 {
+                            let lexer_backup = lexer.clone();
+                            lexer.advance();
                         
-                        if lexer.token == Token::Text {
-                            var_name += lexer.slice();
-                        } else {
-                            *lexer = lexer_backup;
+                            if lexer.token == Token::Text {
+                                var_name += lexer.slice();
+                            } else {
+                                *lexer = lexer_backup;
+                            }
                         }
-                    }
 
-                    expr = Expression::Variable(var_name);
+                        expr = Expression::Variable(var_name);
+                    }
                 }
                 operand_stack.push_front(expr);
             }

@@ -127,6 +127,29 @@ impl Compiler {
         comp
     }
 
+    /// Increments the stack of the front function context by n bytes
+    pub fn inc_stack(&mut self, n: usize) -> CompilerResult<usize> {
+        let front_ctx = self.fn_context_stack.get_mut(0)
+            .ok_or(CompilerError::Unknown)?;
+        front_ctx.stack_size += n;
+        Ok(front_ctx.stack_size)
+    }
+
+    /// Decrements the stack of the front function context by n bytes
+    pub fn dec_stack(&mut self, n: usize) -> CompilerResult<usize> {
+        let front_ctx = self.fn_context_stack.get_mut(0)
+            .ok_or(CompilerError::Unknown)?;
+        front_ctx.stack_size -= n;
+        Ok(front_ctx.stack_size)
+    }
+
+    /// Gets the stack size of the front function context
+    pub fn get_stack_size(&self) -> CompilerResult<usize> {
+        let front_ctx = self.fn_context_stack.get(0)
+            .ok_or(CompilerError::Unknown)?;
+        Ok(front_ctx.stack_size)
+    }
+
     /// Registers a new foreign module in the compiler.
     /// 
     /// Params:
@@ -512,6 +535,14 @@ impl Compiler {
         let var_type = front_context.variable_types.get(var_name)
             .ok_or(CompilerError::UnknownVariable)?;
         Ok(var_type.clone())
+    }
+
+    /// Returns the offset of a variable
+    pub fn offset_of_var(&self, var_name: &String) -> CompilerResult<i64> {
+        let front_context = self.fn_context_stack.get(0)
+            .ok_or(CompilerError::UnknownVariable)?;
+        front_context.offset_of(var_name)
+            .ok_or(CompilerError::UnknownVariable)
     }
 
     /// Returns the type of a function
@@ -1411,65 +1442,172 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
-        let var_name;
-        if let Expression::Variable(name) = var_expr.deref() {
-            var_name = name.clone();
-        } else {
-            return Err(CompilerError::Unknown);
-        }
+        match var_expr.deref() {
+            Expression::Variable(var_name) => {
+                let var_type = self.type_of_var(&var_name)?;
+                let checker = Checker::new(&self);
+                let expr_type = checker.check_expr_type(&assign_expr)
+                    .map_err(|_| CompilerError::TypeMismatch)?;
+
+                if expr_type != var_type {
+                    return Err(CompilerError::TypeMismatch);
+                }
+
+                self.compile_expr(&assign_expr)?;
+        
+                let var_offset = {
+                    let front_context = self.fn_context_stack.get(0)
+                        .ok_or(CompilerError::Unknown)?;
+                    front_context.offset_of(&var_name)
+                        .ok_or(CompilerError::UnknownVariable)?
+                };
+
+                let mov_instr = match var_type {
+                    Type::Int => {
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 8;
+                        //println!"Stack size after MOVI: {}", front_context.stack_size);
+                        Instruction::new(Opcode::SMOVI)
+                            .with_operand(&var_offset)
+                    },
+                    Type::Float => {
+                        let front_context = self.fn_context_stack.get_mut(0)
+                            .ok_or(CompilerError::Unknown)?;
+                        front_context.stack_size -= 4;
+                        //println!"Stack size after MOVI: {}", front_context.stack_size);
+                        Instruction::new(Opcode::SMOVF)
+                            .with_operand(&var_offset)
+                    },
+                    Type::Other(cont_name) => {
+                        let cont_def = self.resolve_cont(&cont_name)?;
+                        let cont_size = cont_def.size(self)? as u64;
+                        Instruction::new(Opcode::SMOVN)
+                            .with_operand(&var_offset)
+                            .with_operand(&cont_size)
+                    },
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::AutoArray(_) => {
+                                let size: u64 = 8;
+                                Instruction::new(Opcode::SMOVN)
+                                .with_operand(&var_offset)
+                                    .with_operand(&size)
+                            },
+                            _ => {
+                                let size: u64 = 16;
+                                Instruction::new(Opcode::SMOVN)
+                                    .with_operand(&var_offset)
+                                    .with_operand(&size)
+                            }
+                        }
+                    },
+                    _ => {
+                        return Err(CompilerError::NotImplemented);
+                    }
+                };
+
+                self.builder.push_instr(mov_instr);
+            },
+            Expression::MemberAccess(lhs, rhs) => {
+                let mut n_depth = 0;
+
+
+            },
+            Expression::Deref(inner_expr) => {
+            
+            },
+            _ => return Err(CompilerError::Unknown)
+        };
 
         //println!("Compiling var assign: var {} = {:?}", var_name, assign_expr);
-
-        let var_type = self.type_of_var(&var_name)?;
-        let checker = Checker::new(&self);
-        let expr_type = checker.check_expr_type(&assign_expr)
-            .map_err(|_| CompilerError::TypeMismatch)?;
-
-        if expr_type != var_type {
-            return Err(CompilerError::TypeMismatch);
-        }
-
-        self.compile_expr(&assign_expr)?;
-        
-        let var_offset = {
-            let front_context = self.fn_context_stack.get(0)
-                .ok_or(CompilerError::Unknown)?;
-            front_context.offset_of(&var_name)
-                .ok_or(CompilerError::UnknownVariable)?
-        };
        //println!("Var assign (name={}) offset of var: {}", var_name, var_offset);
 
         //println!"Var offset for var assign to {}: {}", var_name, var_offset);
 
         //println!("Compiling var assign to var {} which has offset {}", var_name, var_offset);
 
-        let mov_instr = match var_type {
-            Type::Int => {
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 8;
-                //println!"Stack size after MOVI: {}", front_context.stack_size);
-                Instruction::new(Opcode::SMOVI)
-                    .with_operand(&var_offset)
-            },
-            Type::Float => {
-                let front_context = self.fn_context_stack.get_mut(0)
-                    .ok_or(CompilerError::Unknown)?;
-                front_context.stack_size -= 4;
-                //println!"Stack size after MOVI: {}", front_context.stack_size);
-                Instruction::new(Opcode::SMOVF)
-                    .with_operand(&var_offset)
+        Ok(())
+    }
+
+    pub fn compile_var_assign_member_access(&mut self, expr: &Expression, n_depth: &mut u8) -> CompilerResult<()> {
+        let (lhs_expr, rhs_expr) = match expr {
+            Expression::MemberAccess(lhs, rhs) => (lhs, rhs),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let unrolled = self.unroll_member_access(expr)?;
+        let mut last_type = Type::Void;
+        if let Expression::Variable(var_name) = &unrolled[0] {
+            last_type = self.type_of_var(var_name)?;
+            let var_offset = self.offset_of_var(var_name)?;
+            match last_type {
+                Type::Other(_) => {
+                    let sref_instr = Instruction::new(Opcode::SREF)
+                        .with_operand(&var_offset);
+                    self.builder.push_instr(sref_instr);
+                    self.inc_stack(8)?;
+                },
+                Type::Reference(_) => {
+                    let sdup_instr = Instruction::new(Opcode::SDUPA)
+                        .with_operand(&var_offset);
+                    self.builder.push_instr(sdup_instr);
+                    self.inc_stack(8)?;
+                },
+                _ => {}
+            };
+        }
+        for i in 1..unrolled.len() {
+            if let Expression::Variable(var_name) = &unrolled[i] {
+                let cont_name = match &last_type {
+                    Type::Other(name) => name.clone(),
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::Other(name) => name.clone(),
+                            _ => return Err(CompilerError::Unknown)
+                        }
+                    },
+                    _ => return Err(CompilerError::Unknown)
+                };
+                let member_offset = {
+                    let cont_def = self.resolve_cont(&cont_name)?;
+                    cont_def.offset_of(self, var_name)?
+                };
+            }
+        }
+
+        Ok(())
+    }
+    
+    pub fn unroll_member_access(&mut self, expr: &Expression) -> CompilerResult<Vec<Expression>> {
+        let (lhs_expr, rhs_expr) = match expr {
+            Expression::MemberAccess(lhs, rhs) => (lhs, rhs),
+            _ => return Err(CompilerError::Unknown)
+        };
+        
+        let mut ret = Vec::new();
+
+        match lhs_expr.deref() {
+            Expression::Variable(_) => {
+                ret.push(lhs_expr.deref().clone());
             },
             _ => {
-                return Err(CompilerError::NotImplemented);
+                return Err(CompilerError::Unknown);
             }
         };
 
+        match rhs_expr.deref() {
+            Expression::Variable(_) => {
+                ret.push(rhs_expr.deref().clone());
+            },
+            Expression::MemberAccess(_, _) => {
+                let mut nested_unroll = self.unroll_member_access(rhs_expr)?;
+                ret.append(&mut nested_unroll);
+            }
+            _ => return Err(CompilerError::Unknown)
+        }
 
-
-        self.builder.push_instr(mov_instr);
-
-        Ok(())
+        Ok(ret)
     }
 
     pub fn compile_call_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
