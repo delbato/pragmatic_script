@@ -19,7 +19,7 @@ use crate::{
 use std::collections::HashMap;
 
 use pglex::prelude::Lexable;
-
+/*
 #[test]
 fn test_compile_addi() {
     let code = String::from("
@@ -740,4 +740,4 @@ fn test_compile_member_unroll() {
     for el in unroll_res.unwrap() {
         println!("{:?}", el);
     }
-}
+}*/

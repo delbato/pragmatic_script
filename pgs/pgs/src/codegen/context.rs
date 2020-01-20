@@ -20,7 +20,14 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+pub enum VarLocation {
+    Register(u8),
+    Stack(usize)
+}
+
+#[derive(Clone, Debug)]
 pub struct FunctionContext {
+    pub variable_locations: HashMap<String, VarLocation>,
     pub variable_indices: HashMap<String, i64>,
     pub variable_types: HashMap<String, Type>,
     pub functions: HashMap<String, FunctionDeclArgs>,
@@ -32,6 +39,7 @@ pub struct FunctionContext {
 impl FunctionContext {
     pub fn new() -> FunctionContext {
         FunctionContext {
+            variable_locations: HashMap::new(),
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),
@@ -45,6 +53,7 @@ impl FunctionContext {
         let other_size = other.stack_size as i64;
         
         let mut context = FunctionContext {
+            variable_locations: HashMap::new(),
             variable_indices: HashMap::new(),
             variable_types: HashMap::new(),
             functions: HashMap::new(),

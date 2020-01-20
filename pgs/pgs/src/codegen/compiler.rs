@@ -3,7 +3,11 @@ use crate::{
         ast::*
     },
     vm::{
-        is::Opcode
+        is::Opcode,
+        address::{
+            Address,
+            AddressType
+        }
     },
     api::{
         function::{
@@ -1065,17 +1069,24 @@ impl Compiler {
         weak_context = self.fn_context_stack.pop_front()
             .ok_or(CompilerError::Unknown)?;
 
-        //println!("End of while. While context stack size: {}", weak_context.stack_size);
-        
+        // Size of stack allocations
         let popn_size = weak_context.stack_size as u64;
 
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand(&popn_size);
+        // Load popn_size in r7
+        let lda_instr = Instruction::new(Opcode::LDA)
+            .with_operand(&popn_size)
+            .with_operand(7u8);
+        // Subtract sp with r7, basically "popping of the stack"
+        let usub_instr = Instruction::new(Opcode::USUBI)
+            .with_operand(16u8)
+            .with_operand(7u8)
+            .with_operand(16u8);
 
         let jmp_instr = Instruction::new(Opcode::JMP)
             .with_operand(&instr_start);
         
-        self.builder.push_instr(popn_instr);
+        self.builder.push_instr(lda_instr);
+        self.builder.push_instr(usub_instr);
         self.builder.push_instr(jmp_instr);
 
         let instr_end = self.builder.get_current_offset();
@@ -1112,10 +1123,18 @@ impl Compiler {
 
         let mut front_loop_ctx = self.pop_loop_context()?;
 
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand(&popn_size);
+        // Load popn_size in r7
+        let lda_instr = Instruction::new(Opcode::LDA)
+            .with_operand(&popn_size)
+            .with_operand(7u8);
+        // Subtract sp with r7, basically "popping of the stack"
+        let usub_instr = Instruction::new(Opcode::USUBI)
+            .with_operand(16u8)
+            .with_operand(7u8)
+            .with_operand(16u8);
 
-        self.builder.push_instr(popn_instr);
+        self.builder.push_instr(lda_instr);
+        self.builder.push_instr(usub_instr);
 
         let break_tag = self.get_tag();
 
@@ -1146,10 +1165,18 @@ impl Compiler {
 
         let front_loop_ctx = self.pop_loop_context()?;
 
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand(&popn_size);
+        // Load popn_size in r7
+        let lda_instr = Instruction::new(Opcode::LDA)
+            .with_operand(popn_size)
+            .with_operand(7u8);
+        // Subtract sp with r7, basically "popping of the stack"
+        let usub_instr = Instruction::new(Opcode::USUBI)
+            .with_operand(16u8)
+            .with_operand(7u8)
+            .with_operand(16u8);
 
-        self.builder.push_instr(popn_instr);
+        self.builder.push_instr(lda_instr);
+        self.builder.push_instr(usub_instr);
 
         let jmp_instr = Instruction::new(Opcode::JMP)
             .with_operand(&front_loop_ctx.instr_start);
@@ -1211,11 +1238,10 @@ impl Compiler {
         weak_context = self.fn_context_stack.pop_front()
             .ok_or(CompilerError::Unknown)?;
         
-        let popn_size = weak_context.stack_size as u64;
+        let popn_size = weak_context.stack_size;
 
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand(&popn_size);
-        self.builder.push_instr(popn_instr);
+        let popn_instr = Instruction::new_dec_stack(popn_size);
+        self.builder.append_instr(popn_instr);
 
         let offset_end = self.builder.get_current_offset() as u64;
 
@@ -1267,9 +1293,8 @@ impl Compiler {
 
         if size > 0 {
             //println!("Adding POPN instruction");
-            let popn_instr = Instruction::new(Opcode::POPN)
-                .with_operand(&(size as u64));
-            self.builder.push_instr(popn_instr);
+            let popn_instr = Instruction::new_dec_stack(size);
+            self.builder.append_instr(popn_instr);
         }
 
         let front_context = self.fn_context_stack.get_mut(0)
@@ -1310,23 +1335,42 @@ impl Compiler {
         let mut skip_swap = false;
 
         // Save return value to swap space
-        let sv_swap_instr = match &fn_type {
+        let mv_swap_instr = match &fn_type {
             Type::Int => {
-                Instruction::new(Opcode::SVSWPI)
+                Instruction::new(Opcode::MOVI_A)
+                    .with_operand(16u8)
+                    .with_operand(-8i16)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
             },
             Type::Bool => {
-                Instruction::new(Opcode::SVSWPB)
+                Instruction::new(Opcode::MOVB_A)
+                    .with_operand(16u8)
+                    .with_operand(-1i16)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
             },
             Type::Float => {
-                Instruction::new(Opcode::SVSWPF)
+                Instruction::new(Opcode::MOVF_A)
+                    .with_operand(16u8)
+                    .with_operand(-4i16)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
             },
             Type::Reference(_) => {
-                Instruction::new(Opcode::SVSWPN)
-                    .with_operand::<u64>(&8)
+                Instruction::new(Opcode::MOVA_A)
+                    .with_operand(16u8)
+                    .with_operand(-8i16)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
             },
             Type::Other(_) => {
-                Instruction::new(Opcode::SVSWPN)
-                    .with_operand::<u64>(&(size as u64))
+                Instruction::new(Opcode::MOVN_A)
+                    .with_operand(16u8)
+                    .with_operand(-(size as i16))
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(size as u32)
             },
             Type::Void => {
                 skip_swap = true;
@@ -1347,40 +1391,47 @@ impl Compiler {
             ret
         };
 
-        //println!("Stack size until return (including copy): {}", stack_size);
-
-        ////println!"Stack size of current fn context: {}", stack_size);
-
         stack_size -= size;
-        
-        //println!("Stack size until return (excluding copy): {}", stack_size);
 
-        //println!("Stack size to be popped off: {}", stack_size);
-
-        // Pop everything off the stack
-        let popn_instr = Instruction::new(Opcode::POPN)
-            .with_operand::<u64>(&(stack_size as u64));
-        
-        //println!("POPN instr: {:?}", popn_instr);
+        let swap_addr = Address::new(0, AddressType::Swap);
 
         // Load return value from swap space
         let ld_swap_instr = match &fn_type {
             Type::Int => {
-                Instruction::new(Opcode::LDSWPI)
+                Instruction::new(Opcode::MOVI_A)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(16u8)
+                    .with_operand(-8i16)
             },
             Type::Bool => {
-                Instruction::new(Opcode::LDSWPB)
+                Instruction::new(Opcode::MOVB_A)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(16u8)
+                    .with_operand(-1i16)
             },
             Type::Float => {
-                Instruction::new(Opcode::LDSWPF)
+                Instruction::new(Opcode::MOVF_A)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(16u8)
+                    .with_operand(-4i16)
             },
             Type::Reference(_) => {
-                Instruction::new(Opcode::LDSWPN)
-                    .with_operand::<u64>(&8)
+                Instruction::new(Opcode::MOVA_A)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(16u8)
+                    .with_operand(-8i16)
             },
             Type::Other(_) => {
-                Instruction::new(Opcode::LDSWPN)
-                    .with_operand::<u64>(&(size as u64))
+                Instruction::new(Opcode::MOVN_A)
+                    .with_operand(14u8)
+                    .with_operand(0i16)
+                    .with_operand(16u8)
+                    .with_operand(-(size as i16))
+                    .with_operand(size as u64)
             },
             Type::Void => {
                 skip_swap = true;
@@ -1390,12 +1441,17 @@ impl Compiler {
                 return Err(CompilerError::Unknown);
             }
         };
+        let popn_instrs = Instruction::new_dec_stack(stack_size);
         if stack_size > 0 && !skip_swap {
-            self.builder.push_instr(sv_swap_instr);
-            self.builder.push_instr(popn_instr);
+            let lda_instr = Instruction::new(Opcode::LDA)
+                .with_operand::<u64>(swap_addr.into())
+                .with_operand(14u8);
+            self.builder.push_instr(lda_instr);
+            self.builder.push_instr(mv_swap_instr);
+            self.builder.append_instr(popn_instrs);
             self.builder.push_instr(ld_swap_instr);
         } else if stack_size > 0 && skip_swap {
-            self.builder.push_instr(popn_instr);
+            self.builder.append_instr(popn_instrs);
         }
         self.builder.push_instr(Instruction::new(Opcode::RET));
 
@@ -1468,7 +1524,7 @@ impl Compiler {
                             .ok_or(CompilerError::Unknown)?;
                         front_context.stack_size -= 8;
                         //println!"Stack size after MOVI: {}", front_context.stack_size);
-                        Instruction::new(Opcode::SMOVI)
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
                     },
                     Type::Float => {
@@ -1476,13 +1532,13 @@ impl Compiler {
                             .ok_or(CompilerError::Unknown)?;
                         front_context.stack_size -= 4;
                         //println!"Stack size after MOVI: {}", front_context.stack_size);
-                        Instruction::new(Opcode::SMOVF)
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
                     },
                     Type::Other(cont_name) => {
                         let cont_def = self.resolve_cont(&cont_name)?;
                         let cont_size = cont_def.size(self)? as u64;
-                        Instruction::new(Opcode::SMOVN)
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
                             .with_operand(&cont_size)
                     },
@@ -1490,13 +1546,13 @@ impl Compiler {
                         match inner_type.deref() {
                             Type::AutoArray(_) => {
                                 let size: u64 = 8;
-                                Instruction::new(Opcode::SMOVN)
+                                Instruction::new(Opcode::NOOP)
                                 .with_operand(&var_offset)
                                     .with_operand(&size)
                             },
                             _ => {
                                 let size: u64 = 16;
-                                Instruction::new(Opcode::SMOVN)
+                                Instruction::new(Opcode::NOOP)
                                     .with_operand(&var_offset)
                                     .with_operand(&size)
                             }
@@ -1543,13 +1599,13 @@ impl Compiler {
             let var_offset = self.offset_of_var(var_name)?;
             match last_type {
                 Type::Other(_) => {
-                    let sref_instr = Instruction::new(Opcode::SREF)
+                    let sref_instr = Instruction::new(Opcode::NOOP)
                         .with_operand(&var_offset);
                     self.builder.push_instr(sref_instr);
                     self.inc_stack(8)?;
                 },
                 Type::Reference(_) => {
-                    let sdup_instr = Instruction::new(Opcode::SDUPA)
+                    let sdup_instr = Instruction::new(Opcode::NOOP)
                         .with_operand(&var_offset);
                     self.builder.push_instr(sdup_instr);
                     self.inc_stack(8)?;
@@ -1713,7 +1769,7 @@ impl Compiler {
                                         front_context.offset_of(var_name)
                                             .ok_or(CompilerError::UnknownVariable)?
                                     };
-                                    let sdupa_instr = Instruction::new(Opcode::SDUPA)
+                                    let sdupa_instr = Instruction::new(Opcode::NOOP)
                                         .with_operand(&var_offset);
                                     self.builder.push_instr(sdupa_instr);
                                     let front_ctx = self.fn_context_stack.get_mut(0)
@@ -1727,7 +1783,7 @@ impl Compiler {
                                             .ok_or(CompilerError::UnknownVariable)?
                                     };
 
-                                    let sref_instr = Instruction::new(Opcode::SREF)
+                                    let sref_instr = Instruction::new(Opcode::NOOP)
                                         .with_operand(&var_offset);
                                     self.builder.push_instr(sref_instr);
                                     let front_ctx = self.fn_context_stack.get_mut(0)
@@ -1776,7 +1832,7 @@ impl Compiler {
         //println!("Compiling expression: {:?}", expr);
         match expr {
             Expression::IntLiteral(int) => {
-                let pushi_instr = Instruction::new(Opcode::PUSHI)
+                let pushi_instr = Instruction::new(Opcode::NOOP)
                     .with_operand(int);
                 self.builder.push_instr(pushi_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -1784,7 +1840,7 @@ impl Compiler {
                 front_context.stack_size += 8;
             },
             Expression::BoolLiteral(b) => {
-                let pushb_instr = Instruction::new(Opcode::PUSHB)
+                let pushb_instr = Instruction::new(Opcode::NOOP)
                     .with_operand(b);
                 self.builder.push_instr(pushb_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -1798,9 +1854,9 @@ impl Compiler {
                     self.data.add_string(&string)
                 };
                 //println!("Got data string literal \"{}\" with size {}!", string, size);
-                let size_instr = Instruction::new(Opcode::PUSHA)
+                let size_instr = Instruction::new(Opcode::NOOP)
                     .with_operand(&size);
-                let pusha_instr = Instruction::new(Opcode::PUSHA)
+                let pusha_instr = Instruction::new(Opcode::NOOP)
                     .with_operand(&addr);
                 self.builder.push_instr(size_instr);
                 self.builder.push_instr(pusha_instr);
@@ -1809,7 +1865,7 @@ impl Compiler {
                 front_context.stack_size += 16;
             },
             Expression::FloatLiteral(float) => {
-                let pushi_instr = Instruction::new(Opcode::PUSHF)
+                let pushi_instr = Instruction::new(Opcode::NOOP)
                     .with_operand(float);
                 self.builder.push_instr(pushi_instr);
                 let front_context = self.fn_context_stack.get_mut(0)
@@ -1832,18 +1888,18 @@ impl Compiler {
                 };
                 let dup_instr = match var_type {
                     Type::Int => {
-                        Instruction::new(Opcode::SDUPI)
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
                     },
                     Type::Float => {
-                        //println!("Compiling SDUPF");
-                        Instruction::new(Opcode::SDUPF)
+                        //println!("Compiling NOOP");
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
                     },
                     Type::String => {
-                        Instruction::new(Opcode::SDUPN)
+                        Instruction::new(Opcode::NOOP)
                             .with_operand(&var_offset)
-                            .with_operand::<u64>(&16)
+                            .with_operand::<u64>(16)
                     },
                     _ => return Err(CompilerError::NotImplemented)  
                 };

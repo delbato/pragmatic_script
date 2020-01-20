@@ -205,9 +205,10 @@ fn test_engine_foreign_function_string() {
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack_addr(-16)
-                    .map_err(|_| FunctionError::Unknown)?;
-                let string = core.get_mem_string(string_addr)
+                let string_addr: u64 = core.get_reg(0)
+                    .map_err(|_| FunctionError::Unknown)?
+                    .uint64;
+                let string = core.mem_get_string(string_addr)
                     .map_err(|_| FunctionError::Unknown)?;
                 println!("{}", string);
                 core.push_stack::<i64>(69)
@@ -262,8 +263,9 @@ fn test_engine_add_assign() {
         .with_return_type(Type::Int)
         .with_callback(
             Box::new(move |core: &mut Core| {
-                let int: i64 = core.get_stack(-8)
-                    .map_err(|_| FunctionError::Unknown)?;
+                let int: i64 = core.get_reg(0)
+                    .map_err(|_| FunctionError::Unknown)?
+                    .int64;
                 println!("{}", int);
                 core.push_stack::<i64>(0)
                     .map_err(|_| FunctionError::Unknown)

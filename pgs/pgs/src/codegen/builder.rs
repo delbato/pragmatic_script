@@ -62,6 +62,10 @@ impl Builder {
         self.instructions.push(instruction);
     }
 
+    pub fn append_instr(&mut self, mut instructions: Vec<Instruction>) {
+        self.instructions.append(&mut instructions);
+    }
+
     pub fn push_data<T: Serialize>(&mut self, data: T) {
         let mut data = serialize(&data).expect("Could not serialize builder data!");
         self.data.append(&mut data);

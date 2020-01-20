@@ -5,6 +5,10 @@ use super::{
     address::{
         Address,
         AddressType
+    },
+    register::{
+        Register,
+        RegisterAccess
     }
 };
 use crate::{
@@ -72,8 +76,9 @@ pub struct Core {
     program: Option<Program>,
     stack_frames: VecDeque<usize>,
     call_stack: VecDeque<usize>,
-    ip: usize,
-    sp: usize
+    registers: [Register; 16],
+    ip: Register,
+    sp: Register,
 }
 
 #[derive(Debug)]
@@ -85,7 +90,8 @@ pub enum CoreError {
     OperatorSerialize,
     EmptyCallStack,
     UnknownFunctionUid,
-    InvalidStackPointer
+    InvalidStackPointer,
+    InvalidRegister
 }
 
 impl Display for CoreError {
@@ -112,8 +118,9 @@ impl Core {
             foreign_functions: HashMap::new(),
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
-            ip: 0,
-            sp: 0
+            registers: [Register::new(); 16],
+            ip: Register::new(),
+            sp: Register::new()
         }
     }
 
@@ -122,6 +129,7 @@ impl Core {
         self.program = Some(program);
     }
 
+    #[inline]
     pub fn program_len(&self) -> CoreResult<usize> {
         let program = self.program.as_ref()
             .ok_or(CoreError::Unknown)?;
@@ -131,13 +139,19 @@ impl Core {
     }
 
     #[inline]
+    pub fn get_stack_size(&self) -> usize {
+        self.sp.uint64 as usize
+    }
+
+    #[inline]
     pub fn get_opcode(&mut self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
         //println!("Getting opcode {:X} ...", program.code[self.ip]);
-        //println!("Opcode: {:?}", Opcode::from(program.code[self.ip]));
-        let opcode = Opcode::from(program.code[self.ip]);
-        self.ip += 1;
+        //println!("Opcode: {:?}", Opcode::from(program.code[self.ip])),
+
+        let opcode = Opcode::from(program.code[self.ip.uint64 as usize]);
+        self.ip.uint64 += 1;
         
         Ok(
             opcode
@@ -163,183 +177,589 @@ impl Core {
     }
 
     pub fn run_at(&mut self, offset: usize) -> CoreResult<()> {
-        self.ip = offset;
+        self.ip.uint64 = offset as u64;
 
         let program_len = {
             let program = self.program.as_ref()
                 .ok_or(CoreError::NoProgram)?;
-            program.get_size()
+            program.get_size() as u64
         };
 
         //println!("Program length: {}", program_len);
 
-        while self.ip < program_len {
+        while self.ip.uint64 < program_len {
             //println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
             //println!("Stack values: {:?}", &self.stack[0..self.sp]);
             //println!("IP: {}", self.ip);
 
             match opcode {
-                Opcode::NOOP => {
-                    continue;
+                Opcode::NOOP => {},
+                Opcode::HALT => { break },
+                Opcode::MOVB => {
+                    let lhs: u8 = self.get_op()?;
+                    let rhs: u8 = self.get_op()?;
+                    let boolean: bool = {
+                        self.get_reg(lhs)?.get()
+                    };
+                    self.get_reg(rhs)?.set(boolean);
                 },
-                Opcode::PUSHI => {
-                    let op: i64 = self.get_op()?;
-                    self.push_stack(op)?;
+                Opcode::MOVF => {
+                    let lhs: u8 = self.get_op()?;
+                    let rhs: u8 = self.get_op()?;
+                    let float: f32 = {
+                        self.get_reg(lhs)?.get()
+                    };
+                    self.get_reg(rhs)?.set(float);
                 },
-                Opcode::PUSHF => {
-                    let op: f32 = self.get_op()?;
-                    self.push_stack(op)?;
+                Opcode::MOVI => {
+                    let lhs: u8 = self.get_op()?;
+                    let rhs: u8 = self.get_op()?;
+                    let int64: i64 = {
+                        self.get_reg(lhs)?.get()
+                    };
+                    self.get_reg(rhs)?.set(int64);
                 },
-                Opcode::PUSHB => {
-                    let op: bool = self.get_op()?;
-                    self.push_stack(op)?;
+                Opcode::MOVA => {
+                    let lhs: u8 = self.get_op()?;
+                    let rhs: u8 = self.get_op()?;
+                    let uint64: u64 = {
+                        self.get_reg(lhs)?.get()
+                    };
+                    self.get_reg(rhs)?.set(uint64);
                 },
-                Opcode::POPI => {
-                    let _: i64 = self.pop_stack()?;
+                Opcode::MOVB_A => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 1)?;
                 },
-                Opcode::POPN => {
-                    let op: u64 = self.get_op()?;
-                    //println!("Stack size before POPN: {}", self.sp);
-                    //println!("Attempting to pop {} bytes off the stack", op);
-                    //println!("Stack pointer: {}", self.sp);
-                    self.pop_n(op)?;
-                    //println!("Stack size after POPN: {}", self.sp);
+                Opcode::MOVF_A => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 4)?;
                 },
-                Opcode::SDUPI => {
-                    let op: i64 = self.get_op()?;
-                    //println!("SDUPI {} ", op);
-                    self.dupn_stack(op, 8)?;
+                Opcode::MOVI_A => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 8)?;
                 },
-                Opcode::SDUPF => {
-                    let op: i64 = self.get_op()?;
-                    self.dupn_stack(op, 4)?;
+                Opcode::MOVA_A => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 8)?;
                 },
-                Opcode::SDUPA => {
-                    let op: i64 = self.get_op()?;
-                    self.dupn_stack(op, 8)?;
+                Opcode::MOVN_A => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let n: usize = self.get_op::<u32>()? as usize;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), n)?;
                 },
-                Opcode::SDUPN => {
-                    let op: i64 = self.get_op()?;
-                    let size: usize = self.get_op()?;
-                    self.dupn_stack(op, size)?;
+                Opcode::MOVB_AR => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let boolean: bool = self.mem_get((lhs_addr, lhs_offset))?;
+                    self.get_reg(rhs_reg)?.set(boolean);
+                },
+                Opcode::MOVF_AR => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let float: f32 = self.mem_get((lhs_addr, lhs_offset))?;
+                    self.get_reg(rhs_reg)?.set(float)
+                },
+                Opcode::MOVI_AR => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let int64: i64 = self.mem_get((lhs_addr, lhs_offset))?;
+                    self.get_reg(rhs_reg)?.set(int64)
+                },
+                Opcode::MOVA_AR => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let lhs_offset: i16 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let lhs_addr: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let uint64: u64 = self.mem_get((lhs_addr, lhs_offset))?;
+                    self.get_reg(rhs_reg)?.set(uint64)
+                },
+                Opcode::MOVB_RA => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let boolean: bool = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    self.mem_set((rhs_addr, rhs_offset), boolean)?;
+                },
+                Opcode::MOVF_RA => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let float: f32 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    self.mem_set((rhs_addr, rhs_offset), float)?;
+                },
+                Opcode::MOVI_RA => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let int64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    self.mem_set((rhs_addr, rhs_offset), int64)?;
+                },
+                Opcode::MOVA_RA => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let rhs_offset: i16 = self.get_op()?;
+                    let rhs_addr: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let uint64: u64 = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    self.mem_set((rhs_addr, rhs_offset), uint64)?;
+                },
+                Opcode::LDB => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let boolean: bool = self.get_op()?;
+                    self.get_reg(lhs_reg)?.set(boolean);
+                },
+                Opcode::LDF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let float: f32 = self.get_op()?;
+                    self.get_reg(lhs_reg)?.set(float);
+                },
+                Opcode::LDI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let int64: i64 = self.get_op()?;
+                    self.get_reg(lhs_reg)?.set(int64);
+                },
+                Opcode::LDA => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let uint64: u64 = self.get_op()?;
+                    self.get_reg(lhs_reg)?.set(uint64)
                 },
                 Opcode::ADDI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs + rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.int64 = lhs + rhs;
                 },
                 Opcode::SUBI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs - rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.int64 = lhs - rhs;
                 },
                 Opcode::MULI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs * rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.int64 = lhs * rhs;
                 },
                 Opcode::DIVI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs / rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.int64 = lhs / rhs;
+                },
+                Opcode::UADDI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.uint64 = lhs + rhs;
+                },
+                Opcode::USUBI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.uint64 = lhs - rhs;
+                },
+                Opcode::UMULI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.uint64 = lhs * rhs;
+                },
+                Opcode::UDIVI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.uint64 = lhs / rhs;
                 },
                 Opcode::ADDF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs + rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.float: f32 = lhs + rhs;
                 },
                 Opcode::SUBF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs - rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.float: f32 = lhs - rhs;
                 },
                 Opcode::MULF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs * rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.float: f32 = lhs * rhs;
                 },
                 Opcode::DIVF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs / rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    self.get_reg(target_reg)?.float: f32 = lhs / rhs;
+                },
+                Opcode::JMP => {
+                    let target_ip: u64 = self.get_op()?;
+                    self.ip.uint64 = target_ip;
+                },
+                Opcode::JMPT => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let target_ip: u64 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    if lhs {
+                        self.ip.uint64 = target_ip;
+                    }
+                },
+                Opcode::JMPF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let target_ip: u64 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    if !lhs {
+                        self.ip.uint64 = target_ip;
+                    }
+                },
+                Opcode::DJMP => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let target_ip = {
+                        self.get_reg(lhs_reg)?.uint64
+                    };
+                    self.ip.uint64 = target_ip;
+                },
+                Opcode::DJMPT => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_ip = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    if lhs {
+                        self.ip.uint64 = target_ip;
+                    }
+                },
+                Opcode::DJMPF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_ip: u64 = {
+                        self.get_reg(rhs_reg)?.get()
+                    };
+                    let lhs: bool = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    if !lhs {
+                        self.ip.uint64 = target_ip;
+                    }
                 },
                 Opcode::CALL => {
                     self.call()?;
                 },
                 Opcode::RET => {
-                    if self.call_stack.len() == 0 {
-                        //println!("Call stack is empty. Halting the core...");
-                        break;
-                    }
                     self.ret()?;
                 },
-                Opcode::SMOVI => {
-                    let op: i64 = self.get_op()?;
-                    let target_index = (self.sp as i64 + op) as usize;
-                    self.movn(target_index, 8)?;
-                },
-                Opcode::SMOVF => {
-                    let op: i64 = self.get_op()?;
-                    let target_index = (self.sp as i64 + op) as usize;
-                    self.movn(target_index, 4)?;
-                },
-                Opcode::SVSWPI => {
-                    let op: i64 = self.pop_stack()?;
-                    //println!("Swapping out int {}", op);
-                    self.save_swap(op)?;
-                },
-                Opcode::LDSWPI => {
-                    let op: i64 = self.load_swap()?;
-                    //println!("Swapping in int {}", op);
-                    self.push_stack(op)?;
-                },
-                Opcode::JMP => {
-                    let op: u64 = self.get_op()?;
-                    self.ip = op as usize;
-                },
-                Opcode::JMPF => {
-                    let op: u64 = self.get_op()?;
-                    let jump: bool = self.pop_stack()?;
-                    if !jump {
-                        self.ip = op as usize;
-                    }
+                Opcode::NOT => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.get()
+                    };
+                    self.get_reg(rhs_reg)?.boolean = !lhs;
                 },
                 Opcode::EQI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs == rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs == rhs;
+                },
+                Opcode::NEQI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs != rhs;
                 },
                 Opcode::LTI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs < rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs < rhs;
+                },
+                Opcode::GTI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs > rhs;
                 },
                 Opcode::LTEQI => {
-                    let rhs: i64 = self.pop_stack()?;
-                    let lhs: i64 = self.pop_stack()?;
-                    self.push_stack(lhs <= rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs <= rhs;
+                },
+                Opcode::GTEQI => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.int64
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.int64
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs >= rhs;
                 },
                 Opcode::EQF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs == rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs == rhs;
+                },
+                Opcode::NEQF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs != rhs;
                 },
                 Opcode::LTF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs < rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs < rhs;
+                },
+                Opcode::GTF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs > rhs;
                 },
                 Opcode::LTEQF => {
-                    let rhs: f32 = self.pop_stack()?;
-                    let lhs: f32 = self.pop_stack()?;
-                    self.push_stack(lhs <= rhs)?;
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs <= rhs;
                 },
-                Opcode::PUSHA => {
-                    let op: u64 = self.get_op()?;
-                    //println!("pushing addresss {}! ", op);
-                    self.push_stack(op)?;
-                    //println!("stack pointer: {}", self.sp);
+                Opcode::GTEQF => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs = {
+                        self.get_reg(lhs_reg)?.float
+                    };
+                    let rhs = {
+                        self.get_reg(rhs_reg)?.float
+                    };
+                    self.get_reg(target_reg)?.boolean = lhs >= rhs;
                 },
                 _ => {
                     return Err(CoreError::UnimplementedOpcode(opcode));
@@ -347,6 +767,147 @@ impl Core {
             };
         }
         Ok(())
+    }
+
+    fn mem_mov_n(&mut self, lhs: (u64, i16), rhs: (u64, i16), n: usize) -> CoreResult<()> {
+        let lhs_addr: u64 = Address::from(lhs.0).with_offset(lhs.1);
+        let rhs_addr: u64 = Address::from(rhs.0).with_offset(rhs.1);
+
+        let source_addr = lhs_addr.real_address as usize;
+        let target_addr = rhs_addr.real_address as usize;
+
+        let source: &[u8] = match lhs_addr.address_type {
+            AddressType::Stack => {
+                &self.stack
+            },
+            AddressType::Program => {
+                let program = self.program.as_ref()
+                    .ok_or(CoreError::Unknown)?;
+                &program.code
+            },
+            AddressType::Swap => {
+                &self.swap
+            },
+            _ => return Err(CoreError::Unknown)
+        };
+
+        match rhs_addr.address_type {
+            AddressType::Stack => {
+                for i in 0..n {
+                    self.stack[target_addr + i] = source[source_addr + i];
+                }
+            },
+            AddressType::Program => {
+                let program = self.program.as_mut()
+                    .ok_or(CoreError::Unknown)?;
+                for i in 0..n {
+                    program.code[target_addr + i] = source[source_addr + i];
+                }
+            },
+            AddressType::Swap => {
+                for i in 0..n {
+                    self.swap[target_addr + i] = source[source_addr + i];
+                }
+            },
+            _ => return Err(CoreError::Unknown)
+        };
+
+        Ok(())
+    }
+
+    fn mem_get_n(&self, addr: (u64, i16), n: usize) -> CoreResult<Vec<u8>> {
+        let mut data = Vec::with_capacity(n);
+        data.resize(n, 0);
+
+        let lhs_addr: u64 = Address::from(addr.0).with_offset(addr.1);
+
+        let source_addr = lhs_addr.real_address as usize;
+
+        let source: &[u8] = match lhs_addr.address_type {
+            AddressType::Stack => {
+                &self.stack
+            },
+            AddressType::Program => {
+                let program = self.program.as_ref()
+                    .ok_or(CoreError::Unknown)?;
+                &program.code
+            },
+            AddressType::Swap => {
+                &self.swap
+            },
+            _ => return Err(CoreError::Unknown)
+        };
+
+        for i in 0..n {
+            data[i] = source[source_addr + i];
+        }
+
+        Ok(data)
+    }
+    
+    #[inline]
+    pub fn mem_get_string(&self, addr: u64) -> CoreResult<String> {
+        let string_size: u64 = self.mem_get((addr, 0))?;
+        let string_addr: u64 = self.mem_get((addr + 8, 0))?;
+        let string_data = self.mem_get_n((string_addr, 0), string_size as usize)?;
+        String::from_utf8(string_data)
+            .map_err(|_| CoreError::OperatorDeserialize)
+    }
+
+    #[inline]
+    pub fn mem_get<T: DeserializeOwned>(&self, addr: (u64, i16)) -> CoreResult<T> {
+        let n = size_of::<T>();
+
+        let data = self.mem_get_n(addr, n)?;
+
+        deserialize(&data)
+            .map_err(|_| CoreError::OperatorDeserialize)
+    }
+    
+    #[inline]
+    pub fn mem_set<T: Serialize>(&mut self, addr: (u64, i16), item: T) -> CoreResult<()> {
+        let n = size_of::<T>();
+
+        let lhs_addr: u64 = Address::from(addr.0).with_offset(addr.1);
+
+        let data = serialize(&item)
+            .map_err(|_| CoreError::OperatorSerialize)?;
+
+        let target_addr = lhs_addr.real_address as usize;
+        
+        match lhs_addr.address_type {
+            AddressType::Stack => {
+                for i in 0..n {
+                    self.stack[target_addr + i] = data[i];
+                }
+            },
+            AddressType::Program => {
+                let program = self.program.as_mut()
+                    .ok_or(CoreError::Unknown)?;
+                for i in 0..n {
+                    program.code[target_addr + i] = data[i];
+                }
+            },
+            _ => return Err(CoreError::Unknown)
+        };
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn get_reg(&self, reg: u8) -> CoreResult<&mut Register> {
+        if reg == 16 {
+            return Ok(&mut self.sp);
+        }
+        if reg == 17 {
+            return Ok(&mut self.ip);
+        }
+        else if reg < 16 {
+            return Ok(&mut self.registers[reg as usize]);
+        }
+        else {
+            return Err(CoreError::InvalidRegister);
+        }
     }
 
     #[inline]
@@ -367,9 +928,9 @@ impl Core {
             .ok_or(CoreError::UnknownFunctionUid)?;
 
         
-        let old_ip = self.ip;
+        let old_ip = self.ip.uint64 as usize;
         self.call_stack.push_front(old_ip);
-        self.ip = *new_ip;
+        self.ip.uint64 = *new_ip as u64;
 
         Ok(())
     }
@@ -378,100 +939,7 @@ impl Core {
     fn ret(&mut self) -> CoreResult<()> {
         let old_ip = self.call_stack.pop_front()
             .ok_or(CoreError::EmptyCallStack)?;
-        self.ip = old_ip;
-        Ok(())
-    }
-
-    #[inline]
-    fn movn(&mut self, target_index: usize, size: usize) -> CoreResult<()> {
-        self.sp -= size;
-
-        for i in 0..size {
-            self.stack[target_index + i] = self.stack[self.sp + i];
-        }
-
-        Ok(())
-    }
-
-    pub fn get_mem_string(&self, address: u64) -> CoreResult<String> {
-        let string_size = self.get_mem::<usize>(address)?;
-
-        let bytes = self.get_mem_n(address + 8, string_size)?;
-
-        let string = unsafe {
-            String::from_utf8_unchecked(bytes)
-        };
-
-        Ok(string)
-    }
-
-    #[inline]
-    fn get_mem<T: DeserializeOwned>(&self, address: u64) -> CoreResult<T> {
-        let op_size = size_of::<T>();
-
-        let raw_bytes = self.get_mem_n(address, op_size)?;
-
-        deserialize(&raw_bytes)
-            .map_err(|_| CoreError::OperatorDeserialize)
-    }
-
-    #[inline]
-    fn get_mem_n(&self, address: u64, n: usize) -> CoreResult<Vec<u8>> {
-        let mut raw_bytes = Vec::with_capacity(n);
-        raw_bytes.resize(n, 0);
-
-        let address = Address::from(address);
-        match address.address_type {
-            AddressType::Program => {
-                let program = self.program.as_ref().unwrap();
-                for i in 0..n {
-                    let tmp = address.real_address as usize + i;
-                    raw_bytes[i] = program.code[tmp];
-                }
-            },
-            AddressType::Stack => {
-                for i in 0..n {
-                    let tmp = address.real_address as usize + i;
-                    raw_bytes[i] = self.stack[tmp];
-                }
-            },
-            _ => return Err(CoreError::Unknown)
-        };
-
-        Ok(raw_bytes)
-    }
-
-    #[inline]
-    fn set_mem<T: Serialize>(&mut self, address: u64, item: T) -> CoreResult<()> {
-        let raw_bytes = serialize(&item)
-            .map_err(|_| CoreError::OperatorSerialize)?;
-
-        self.set_mem_n(address, &raw_bytes)?;
-
-        Ok(())
-    }
-
-    #[inline]
-    fn set_mem_n(&mut self, address: u64, bytes: &[u8]) -> CoreResult<()> {
-        let address = Address::from(address);
-
-        match address.address_type {
-            AddressType::Program => {
-                let program = self.program.as_mut().unwrap();
-                for i in 0..bytes.len() {
-                    let tmp = address.real_address as usize + i;
-                    program.code[tmp] = bytes[i];
-                }
-            },
-            AddressType::Stack => {
-                for i in 0..bytes.len() {
-                    let tmp = address.real_address as usize + i;
-                    self.stack[tmp] = bytes[i];
-                }
-            },
-            _ => return Err(CoreError::Unknown)
-        };
-
+        self.ip.uint64 = old_ip as u64;
         Ok(())
     }
 
@@ -481,13 +949,15 @@ impl Core {
 
         let program = &self.program.as_ref().unwrap().code;
 
-        let raw_bytes: &[u8] = &program[self.ip..self.ip + op_size];
+        let tmp_ip = self.ip.uint64 as usize;
+
+        let raw_bytes: &[u8] = &program[tmp_ip..tmp_ip + op_size];
         //println!("get_op raw bytes: {:?}", raw_bytes);
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
 
-        self.ip += op_size;
+        self.ip.uint64 += op_size as u64;
 
         Ok(ret)
     }
@@ -499,15 +969,17 @@ impl Core {
         let raw_bytes = serialize(&item)
             .map_err(|_| CoreError::OperatorSerialize)?;
 
-        if self.stack.len() - (self.sp + op_size) <= STACK_GROW_THRESHOLD {
+        let tmp_sp = self.sp.uint64 as usize;
+
+        if self.stack.len() - (tmp_sp + op_size) <= STACK_GROW_THRESHOLD {
             self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
         } 
         
         for i in 0..op_size {
-            self.stack[self.sp + i] = raw_bytes[i];
+            self.stack[tmp_sp + i] = raw_bytes[i];
         }
         
-        self.sp += op_size;
+        self.sp.uint64 += op_size as u64;
 
         Ok(())
     }
@@ -519,68 +991,22 @@ impl Core {
         let mut raw_bytes = Vec::with_capacity(op_size);
         raw_bytes.resize(op_size, 0);
 
-        self.sp -= op_size;
-        if self.sp < 0 {
+        let mut tmp_sp = self.sp.uint64 as usize;
+
+        if op_size > tmp_sp {
             return Err(CoreError::InvalidStackPointer);
         }
 
+        tmp_sp -= op_size;
+
         for i in 0..op_size {
-            raw_bytes[i] = self.stack[self.sp + i];
+            raw_bytes[i] = self.stack[tmp_sp + i];
         }
+
+        self.sp.uint64 = tmp_sp as u64;
 
         deserialize(&raw_bytes)
             .map_err(|_| CoreError::Unknown)
-    }
-
-    #[inline]
-    pub fn dupn_stack(&mut self, offset: i64, size: usize) -> CoreResult<()> {
-        if self.stack.len() - (self.sp + size) <= STACK_GROW_THRESHOLD {
-            self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
-        }
-        
-        let tmp_sp = (self.sp as i64 + offset) as usize;
-        
-        //println!("Duplicating stack from {} to {}", tmp_sp, tmp_sp + size);
-
-        for i in 0..size {
-            self.stack[self.sp + i] = self.stack[tmp_sp + i];
-        }
-
-        self.sp += size;
-
-        Ok(())
-    }
-
-    #[inline]
-    pub fn pop_n(&mut self, n: u64) -> CoreResult<Vec<u8>> {
-        let mut ret = Vec::new();
-
-        self.sp -= n as usize;
-        if self.sp < 0 {
-            return Err(CoreError::InvalidStackPointer);
-        }
-
-        for i in 0..n {
-            ret.push(self.stack[self.sp + i as usize]);
-        }
-        
-        Ok(ret)
-    }
-
-    #[inline]
-    fn load_swap<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
-        let op_size = size_of::<T>();
-
-        let mut raw_bytes = Vec::new();
-        raw_bytes.resize(op_size, 0);
-
-        for i in 0..op_size {
-            raw_bytes[i] = self.swap[i];
-        }
-
-        let ret = deserialize(&raw_bytes)
-            .map_err(|_| CoreError::OperatorDeserialize)?;
-        Ok(ret)
     }
 
     #[inline]
@@ -599,43 +1025,6 @@ impl Core {
         }
 
         Ok(())
-    }
-
-    #[inline]
-    pub fn get_stack<T: DeserializeOwned>(&self, offset: i64) -> CoreResult<T> {
-        let sp;
-        if offset < 0 {
-            sp = self.sp - i64::abs(offset) as usize;
-        } else {
-            sp = self.sp + i64::abs(offset) as usize;
-        }
-
-        let type_size = size_of::<T>();
-        let mut raw_bytes = Vec::new();
-        for i in sp..sp + type_size {
-            raw_bytes.push(self.stack[i]);
-        }
-
-        deserialize(&raw_bytes)
-            .map_err(|_| CoreError::OperatorDeserialize)
-    }
-
-    #[inline]
-    pub fn get_stack_addr(&self, offset: i64) -> CoreResult<u64> {
-        let sp;
-        if offset < 0 {
-            sp = self.sp - i64::abs(offset) as usize;
-        } else {
-            sp = self.sp + i64::abs(offset) as usize;
-        }
-
-        let address = Address::new(sp as u64, AddressType::Stack);
-        Ok(address.raw_address)
-    }
-
-    #[inline]
-    pub fn get_stack_size(&self) -> usize {
-        self.sp
     }
 
     pub fn register_foreign_module(&mut self, module: Module) -> CoreResult<()> {
