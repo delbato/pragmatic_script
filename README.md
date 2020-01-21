@@ -3,6 +3,7 @@
 _A pragmatic scripting language_
 
 ### <i>! This is all very heavily WIP. Does not work properly yet !</i>
+### CURRENTLY SWITCHING FROM A STACK VM TO A REGISTER VM. NON-FUNCTIONAL ATM
 
 ## What is this?
 
