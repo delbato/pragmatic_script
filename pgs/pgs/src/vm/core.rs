@@ -109,6 +109,9 @@ impl Core {
         stack.resize(stack_size, 0);
         let mut swap = Vec::new();
         swap.resize(SWAP_SPACE_SIZE, 0);
+        let mut sp = Register::new();
+        let address = Address::new(0, AddressType::Stack);
+        sp.set::<u64>(address.into());
         Core {
             program: None,
             swap: swap,
@@ -120,7 +123,7 @@ impl Core {
             call_stack: VecDeque::new(),
             registers: [Register::new(); 16],
             ip: Register::new(),
-            sp: Register::new()
+            sp: sp
         }
     }
 
@@ -140,7 +143,7 @@ impl Core {
 
     #[inline]
     pub fn get_stack_size(&self) -> usize {
-        self.sp.uint64 as usize
+        self.sp.get()
     }
 
     #[inline]
@@ -149,9 +152,9 @@ impl Core {
             .ok_or(CoreError::NoProgram)?;
         //println!("Getting opcode {:X} ...", program.code[self.ip]);
         //println!("Opcode: {:?}", Opcode::from(program.code[self.ip])),
-
-        let opcode = Opcode::from(program.code[self.ip.uint64 as usize]);
-        self.ip.uint64 += 1;
+        let ip: usize = self.ip.get();
+        let opcode = Opcode::from(program.code[ip]);
+        self.ip.inc(1usize);
         
         Ok(
             opcode
@@ -177,17 +180,10 @@ impl Core {
     }
 
     pub fn run_at(&mut self, offset: usize) -> CoreResult<()> {
-        self.ip.uint64 = offset as u64;
-
-        let program_len = {
-            let program = self.program.as_ref()
-                .ok_or(CoreError::NoProgram)?;
-            program.get_size() as u64
-        };
-
+        self.ip.set(offset);
+        let program_len = self.program_len()?;
         //println!("Program length: {}", program_len);
-
-        while self.ip.uint64 < program_len {
+        while self.ip.get::<usize>() < program_len {
             //println!("ip: {}", self.ip);
             let opcode = self.get_opcode()?;
             //println!("Stack values: {:?}", &self.stack[0..self.sp]);
@@ -200,33 +196,33 @@ impl Core {
                     let lhs: u8 = self.get_op()?;
                     let rhs: u8 = self.get_op()?;
                     let boolean: bool = {
-                        self.get_reg(lhs)?.get()
+                        self.reg(lhs)?.get()
                     };
-                    self.get_reg(rhs)?.set(boolean);
+                    self.reg(rhs)?.set(boolean);
                 },
                 Opcode::MOVF => {
                     let lhs: u8 = self.get_op()?;
                     let rhs: u8 = self.get_op()?;
                     let float: f32 = {
-                        self.get_reg(lhs)?.get()
+                        self.reg(lhs)?.get()
                     };
-                    self.get_reg(rhs)?.set(float);
+                    self.reg(rhs)?.set(float);
                 },
                 Opcode::MOVI => {
                     let lhs: u8 = self.get_op()?;
                     let rhs: u8 = self.get_op()?;
                     let int64: i64 = {
-                        self.get_reg(lhs)?.get()
+                        self.reg(lhs)?.get()
                     };
-                    self.get_reg(rhs)?.set(int64);
+                    self.reg(rhs)?.set(int64);
                 },
                 Opcode::MOVA => {
                     let lhs: u8 = self.get_op()?;
                     let rhs: u8 = self.get_op()?;
                     let uint64: u64 = {
-                        self.get_reg(lhs)?.get()
+                        self.reg(lhs)?.get()
                     };
-                    self.get_reg(rhs)?.set(uint64);
+                    self.reg(rhs)?.set(uint64);
                 },
                 Opcode::MOVB_A => {
                     let lhs_reg: u8 = self.get_op()?;
@@ -234,10 +230,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 1)?;
                 },
@@ -247,10 +243,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 4)?;
                 },
@@ -260,10 +256,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 8)?;
                 },
@@ -273,10 +269,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), 8)?;
                 },
@@ -287,10 +283,10 @@ impl Core {
                     let rhs_offset: i16 = self.get_op()?;
                     let n: usize = self.get_op::<u32>()? as usize;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     self.mem_mov_n((lhs_addr, lhs_offset), (rhs_addr, rhs_offset), n)?;
                 },
@@ -299,50 +295,50 @@ impl Core {
                     let lhs_offset: i16 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let boolean: bool = self.mem_get((lhs_addr, lhs_offset))?;
-                    self.get_reg(rhs_reg)?.set(boolean);
+                    self.reg(rhs_reg)?.set(boolean);
                 },
                 Opcode::MOVF_AR => {
                     let lhs_reg: u8 = self.get_op()?;
                     let lhs_offset: i16 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let float: f32 = self.mem_get((lhs_addr, lhs_offset))?;
-                    self.get_reg(rhs_reg)?.set(float)
+                    self.reg(rhs_reg)?.set(float)
                 },
                 Opcode::MOVI_AR => {
                     let lhs_reg: u8 = self.get_op()?;
                     let lhs_offset: i16 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let int64: i64 = self.mem_get((lhs_addr, lhs_offset))?;
-                    self.get_reg(rhs_reg)?.set(int64)
+                    self.reg(rhs_reg)?.set(int64)
                 },
                 Opcode::MOVA_AR => {
                     let lhs_reg: u8 = self.get_op()?;
                     let lhs_offset: i16 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let lhs_addr: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     let uint64: u64 = self.mem_get((lhs_addr, lhs_offset))?;
-                    self.get_reg(rhs_reg)?.set(uint64)
+                    self.reg(rhs_reg)?.set(uint64)
                 },
                 Opcode::MOVB_RA => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     let boolean: bool = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     self.mem_set((rhs_addr, rhs_offset), boolean)?;
                 },
@@ -351,10 +347,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     let float: f32 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     self.mem_set((rhs_addr, rhs_offset), float)?;
                 },
@@ -363,10 +359,10 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
-                    let int64 = {
-                        self.get_reg(lhs_reg)?.get()
+                    let int64: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
                     self.mem_set((rhs_addr, rhs_offset), int64)?;
                 },
@@ -375,232 +371,232 @@ impl Core {
                     let rhs_reg: u8 = self.get_op()?;
                     let rhs_offset: i16 = self.get_op()?;
                     let rhs_addr: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     let uint64: u64 = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     self.mem_set((rhs_addr, rhs_offset), uint64)?;
                 },
                 Opcode::LDB => {
-                    let lhs_reg: u8 = self.get_op()?;
                     let boolean: bool = self.get_op()?;
-                    self.get_reg(lhs_reg)?.set(boolean);
+                    let lhs_reg: u8 = self.get_op()?;
+                    self.reg(lhs_reg)?.set(boolean);
                 },
                 Opcode::LDF => {
-                    let lhs_reg: u8 = self.get_op()?;
                     let float: f32 = self.get_op()?;
-                    self.get_reg(lhs_reg)?.set(float);
+                    let lhs_reg: u8 = self.get_op()?;
+                    self.reg(lhs_reg)?.set(float);
                 },
                 Opcode::LDI => {
-                    let lhs_reg: u8 = self.get_op()?;
                     let int64: i64 = self.get_op()?;
-                    self.get_reg(lhs_reg)?.set(int64);
+                    let lhs_reg: u8 = self.get_op()?;
+                    self.reg(lhs_reg)?.set(int64);
                 },
                 Opcode::LDA => {
-                    let lhs_reg: u8 = self.get_op()?;
                     let uint64: u64 = self.get_op()?;
-                    self.get_reg(lhs_reg)?.set(uint64)
+                    let lhs_reg: u8 = self.get_op()?;
+                    self.reg(lhs_reg)?.set(uint64)
                 },
                 Opcode::ADDI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.int64 = lhs + rhs;
+                    self.reg(target_reg)?.set(lhs + rhs);
                 },
                 Opcode::SUBI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.int64 = lhs - rhs;
+                    self.reg(target_reg)?.set(lhs - rhs);
                 },
                 Opcode::MULI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.int64 = lhs * rhs;
+                    self.reg(target_reg)?.set(lhs * rhs);
                 },
                 Opcode::DIVI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.int64 = lhs / rhs;
+                    self.reg(target_reg)?.set(lhs / rhs)
                 },
                 Opcode::UADDI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: u64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.uint64 = lhs + rhs;
+                    self.reg(target_reg)?.set(lhs + rhs);
                 },
                 Opcode::USUBI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: u64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.uint64 = lhs - rhs;
+                    self.reg(target_reg)?.set(lhs - rhs)
                 },
                 Opcode::UMULI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: u64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.uint64 = lhs * rhs;
+                    self.reg(target_reg)?.set(lhs * rhs)
                 },
                 Opcode::UDIVI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: u64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.uint64 = lhs / rhs;
+                    self.reg(target_reg)?.set(lhs / rhs)
                 },
                 Opcode::ADDF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.float: f32 = lhs + rhs;
+                    self.reg(target_reg)?.set(lhs + rhs);
                 },
                 Opcode::SUBF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.float: f32 = lhs - rhs;
+                    self.reg(target_reg)?.set(lhs - rhs);
                 },
                 Opcode::MULF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.float: f32 = lhs * rhs;
+                    self.reg(target_reg)?.set(lhs * rhs);
                 },
                 Opcode::DIVF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.get()
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.float: f32 = lhs / rhs;
+                    self.reg(target_reg)?.set(lhs / rhs);
                 },
                 Opcode::JMP => {
                     let target_ip: u64 = self.get_op()?;
-                    self.ip.uint64 = target_ip;
+                    self.ip.set(target_ip);
                 },
                 Opcode::JMPT => {
                     let lhs_reg: u8 = self.get_op()?;
                     let target_ip: u64 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
                     };
                     if lhs {
-                        self.ip.uint64 = target_ip;
+                        self.ip.set(target_ip);
                     }
                 },
                 Opcode::JMPF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let target_ip: u64 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
                     };
                     if !lhs {
-                        self.ip.uint64 = target_ip;
+                        self.ip.set(target_ip);
                     }
                 },
                 Opcode::DJMP => {
                     let lhs_reg: u8 = self.get_op()?;
-                    let target_ip = {
-                        self.get_reg(lhs_reg)?.uint64
+                    let target_ip: u64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    self.ip.uint64 = target_ip;
+                    self.ip.set(target_ip);
                 },
                 Opcode::DJMPT => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
-                    let target_ip = {
-                        self.get_reg(rhs_reg)?.get()
+                    let target_ip: u64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
                     };
                     if lhs {
-                        self.ip.uint64 = target_ip;
+                        self.ip.set(target_ip);
                     }
                 },
                 Opcode::DJMPF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_ip: u64 = {
-                        self.get_reg(rhs_reg)?.get()
+                        self.reg(rhs_reg)?.get()
                     };
                     let lhs: bool = {
-                        self.get_reg(lhs_reg)?.get()
+                        self.reg(lhs_reg)?.get()
                     };
                     if !lhs {
-                        self.ip.uint64 = target_ip;
+                        self.ip.set(target_ip);
                     }
                 },
                 Opcode::CALL => {
@@ -612,154 +608,154 @@ impl Core {
                 Opcode::NOT => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.get()
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    self.get_reg(rhs_reg)?.boolean = !lhs;
+                    self.reg(rhs_reg)?.set(!lhs);
                 },
                 Opcode::EQI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs == rhs;
+                    self.reg(target_reg)?.set(lhs == rhs);
                 },
                 Opcode::NEQI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs != rhs;
+                    self.reg(target_reg)?.set(lhs != rhs);
                 },
                 Opcode::LTI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs < rhs;
+                    self.reg(target_reg)?.set(lhs < rhs);
                 },
                 Opcode::GTI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs > rhs;
+                    self.reg(target_reg)?.set(lhs > rhs);
                 },
                 Opcode::LTEQI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs <= rhs;
+                    self.reg(target_reg)?.set(lhs <= rhs);
                 },
                 Opcode::GTEQI => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.int64
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.int64
+                    let rhs: i64 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs >= rhs;
+                    self.reg(target_reg)?.set(lhs >= rhs);
                 },
                 Opcode::EQF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs == rhs;
+                    self.reg(target_reg)?.set(lhs == rhs);
                 },
                 Opcode::NEQF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs != rhs;
+                    self.reg(target_reg)?.set(lhs != rhs);
                 },
                 Opcode::LTF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs < rhs;
+                    self.reg(target_reg)?.set(lhs < rhs);
                 },
                 Opcode::GTF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs > rhs;
+                    self.reg(target_reg)?.set(lhs > rhs);
                 },
                 Opcode::LTEQF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs <= rhs;
+                    self.reg(target_reg)?.set(lhs <= rhs);
                 },
                 Opcode::GTEQF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
-                    let lhs = {
-                        self.get_reg(lhs_reg)?.float
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
-                    let rhs = {
-                        self.get_reg(rhs_reg)?.float
+                    let rhs: f32 = {
+                        self.reg(rhs_reg)?.get()
                     };
-                    self.get_reg(target_reg)?.boolean = lhs >= rhs;
+                    self.reg(target_reg)?.set(lhs >= rhs);
                 },
                 _ => {
                     return Err(CoreError::UnimplementedOpcode(opcode));
@@ -770,43 +766,54 @@ impl Core {
     }
 
     fn mem_mov_n(&mut self, lhs: (u64, i16), rhs: (u64, i16), n: usize) -> CoreResult<()> {
-        let lhs_addr: u64 = Address::from(lhs.0).with_offset(lhs.1);
-        let rhs_addr: u64 = Address::from(rhs.0).with_offset(rhs.1);
+        let lhs_addr = Address::from(lhs.0).with_offset(lhs.1);
+        let rhs_addr = Address::from(rhs.0).with_offset(rhs.1);
 
         let source_addr = lhs_addr.real_address as usize;
         let target_addr = rhs_addr.real_address as usize;
 
-        let source: &[u8] = match lhs_addr.address_type {
-            AddressType::Stack => {
-                &self.stack
-            },
-            AddressType::Program => {
-                let program = self.program.as_ref()
-                    .ok_or(CoreError::Unknown)?;
-                &program.code
-            },
-            AddressType::Swap => {
-                &self.swap
-            },
-            _ => return Err(CoreError::Unknown)
+        let bytes = {
+            let source: &[u8] = match lhs_addr.address_type {
+                AddressType::Stack => {
+                    &self.stack
+                },
+                AddressType::Program => {
+                    let program = self.program.as_mut()
+                        .ok_or(CoreError::Unknown)?;
+                    &program.code
+                },
+                AddressType::Swap => {
+                    &self.swap
+                },
+                _ => return Err(CoreError::Unknown)
+            };
+            
+            let mut ret = Vec::with_capacity(n);
+            ret.resize(n, 0);
+
+            for i in 0..n {
+                ret[i] = source[source_addr + i];
+            }
+
+            ret
         };
 
         match rhs_addr.address_type {
             AddressType::Stack => {
                 for i in 0..n {
-                    self.stack[target_addr + i] = source[source_addr + i];
+                    self.stack[target_addr + i] = bytes[i];
                 }
             },
             AddressType::Program => {
                 let program = self.program.as_mut()
                     .ok_or(CoreError::Unknown)?;
                 for i in 0..n {
-                    program.code[target_addr + i] = source[source_addr + i];
+                    program.code[target_addr + i] = bytes[i];
                 }
             },
             AddressType::Swap => {
                 for i in 0..n {
-                    self.swap[target_addr + i] = source[source_addr + i];
+                    self.swap[target_addr + i] = bytes[i];
                 }
             },
             _ => return Err(CoreError::Unknown)
@@ -819,7 +826,7 @@ impl Core {
         let mut data = Vec::with_capacity(n);
         data.resize(n, 0);
 
-        let lhs_addr: u64 = Address::from(addr.0).with_offset(addr.1);
+        let lhs_addr = Address::from(addr.0).with_offset(addr.1);
 
         let source_addr = lhs_addr.real_address as usize;
 
@@ -868,7 +875,7 @@ impl Core {
     pub fn mem_set<T: Serialize>(&mut self, addr: (u64, i16), item: T) -> CoreResult<()> {
         let n = size_of::<T>();
 
-        let lhs_addr: u64 = Address::from(addr.0).with_offset(addr.1);
+        let lhs_addr = Address::from(addr.0).with_offset(addr.1);
 
         let data = serialize(&item)
             .map_err(|_| CoreError::OperatorSerialize)?;
@@ -895,7 +902,7 @@ impl Core {
     }
 
     #[inline]
-    pub fn get_reg(&self, reg: u8) -> CoreResult<&mut Register> {
+    pub fn reg(&mut self, reg: u8) -> CoreResult<&mut Register> {
         if reg == 16 {
             return Ok(&mut self.sp);
         }
@@ -928,9 +935,9 @@ impl Core {
             .ok_or(CoreError::UnknownFunctionUid)?;
 
         
-        let old_ip = self.ip.uint64 as usize;
+        let old_ip: usize = self.ip.get();
         self.call_stack.push_front(old_ip);
-        self.ip.uint64 = *new_ip as u64;
+        self.ip.set(*new_ip);
 
         Ok(())
     }
@@ -949,7 +956,7 @@ impl Core {
 
         let program = &self.program.as_ref().unwrap().code;
 
-        let tmp_ip = self.ip.uint64 as usize;
+        let tmp_ip = self.ip.get::<usize>();
 
         let raw_bytes: &[u8] = &program[tmp_ip..tmp_ip + op_size];
         //println!("get_op raw bytes: {:?}", raw_bytes);
@@ -957,7 +964,7 @@ impl Core {
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
 
-        self.ip.uint64 += op_size as u64;
+        self.ip.inc(op_size);
 
         Ok(ret)
     }
@@ -969,7 +976,7 @@ impl Core {
         let raw_bytes = serialize(&item)
             .map_err(|_| CoreError::OperatorSerialize)?;
 
-        let tmp_sp = self.sp.uint64 as usize;
+        let tmp_sp = self.sp.get::<usize>();
 
         if self.stack.len() - (tmp_sp + op_size) <= STACK_GROW_THRESHOLD {
             self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
@@ -979,7 +986,7 @@ impl Core {
             self.stack[tmp_sp + i] = raw_bytes[i];
         }
         
-        self.sp.uint64 += op_size as u64;
+        self.sp.inc(op_size);
 
         Ok(())
     }
@@ -991,19 +998,21 @@ impl Core {
         let mut raw_bytes = Vec::with_capacity(op_size);
         raw_bytes.resize(op_size, 0);
 
-        let mut tmp_sp = self.sp.uint64 as usize;
+        let sp_raw = self.sp.get::<u64>();
+        let sp_addr = Address::from(sp_raw);
 
-        if op_size > tmp_sp {
+        if op_size > self.sp.get::<usize>() {
             return Err(CoreError::InvalidStackPointer);
         }
 
-        tmp_sp -= op_size;
+        let mut source_addr = sp_addr.real_address as usize;
+        source_addr -= op_size;
 
         for i in 0..op_size {
-            raw_bytes[i] = self.stack[tmp_sp + i];
+            raw_bytes[i] = self.stack[source_addr + i];
         }
 
-        self.sp.uint64 = tmp_sp as u64;
+        self.sp.dec(op_size);
 
         deserialize(&raw_bytes)
             .map_err(|_| CoreError::Unknown)

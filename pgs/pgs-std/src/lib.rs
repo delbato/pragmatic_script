@@ -25,7 +25,7 @@ use pgs::{
 };
 
 fn register_std_print(engine: &mut Engine) -> EngineResult<()> {
-
+/*
     let fn_print = Function::new(String::from("print"))
         .with_argument(Type::String)
         .with_return_type(Type::Int)
@@ -75,6 +75,8 @@ fn register_std_print(engine: &mut Engine) -> EngineResult<()> {
         .with_function(fn_println);
 
     engine.register_module(module)
+    */
+    Ok(())
 }
 
 #[no_mangle]
