@@ -551,8 +551,8 @@ impl Parser {
         fn_decl_opt.ok_or(ParseError::new(ParseErrorType::Unknown, lexer.range()))
     }
 
-    pub fn parse_fn_args(&self, lexer: &mut Lexer) -> ParseResult<BTreeMap<usize, (String, Type)>> {
-        let mut ret = BTreeMap::new();
+    pub fn parse_fn_args(&self, lexer: &mut Lexer) -> ParseResult<Vec<(String, Type)>> {
+        let mut ret = Vec::new();
         let mut fn_arg_set = HashSet::new();
 
         let mut arg_index = 0;
@@ -570,7 +570,7 @@ impl Parser {
             }
             fn_arg_set.insert(fn_arg.0.clone());
 
-            ret.insert(arg_index, fn_arg);
+            ret.push(fn_arg);
 
             lexer.advance();
             if lexer.token != Token::Comma {
@@ -680,23 +680,19 @@ impl Parser {
         )
     }
 
-    pub fn parse_container_members(&self, lexer: &mut Lexer) -> ParseResult<BTreeMap<usize, (String, Type)>> {
-        let mut ret = BTreeMap::new();
+    pub fn parse_container_members(&self, lexer: &mut Lexer) -> ParseResult<Vec<(String, Type)>> {
+        let mut ret = Vec::new();
         let mut members = HashSet::new();
-        let mut member_index = 0;
         while lexer.token != Token::CloseBlock &&
             lexer.token != Token::End &&
             lexer.token != Token::Error {
-            
             let member = self.parse_container_member(lexer)?;
             if members.contains(&member.0) {
                 return Err(ParseError::new(ParseErrorType::DuplicateMember, lexer.range()));
             }
             members.insert(member.0.clone());
-            ret.insert(member_index, member);
-            member_index += 1;
+            ret.push(member);
         }
-
         Ok(ret)
     }
 

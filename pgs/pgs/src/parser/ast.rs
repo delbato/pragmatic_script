@@ -138,7 +138,7 @@ pub enum Operator {
 #[derive(PartialEq, Debug, Clone)]
 pub struct FunctionDeclArgs {
     pub name: String,
-    pub arguments: BTreeMap<usize, (String, Type)>,
+    pub arguments: Vec<(String, Type)>,
     pub returns: Type,
     pub code_block: Option<Vec<Statement>>
 }
@@ -146,7 +146,7 @@ pub struct FunctionDeclArgs {
 #[derive(PartialEq, Debug, Clone)]
 pub struct ContainerDeclArgs {
     pub name: String,
-    pub members: BTreeMap<usize, (String, Type)>
+    pub members: Vec<(String, Type)>
 }
 
 #[derive(PartialEq, Debug)]

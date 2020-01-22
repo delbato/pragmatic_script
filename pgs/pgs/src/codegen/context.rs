@@ -1,151 +1,132 @@
+use crate::{
+    codegen::{
+        def::{
+            ContainerDef,
+            FunctionDef
+        },
+        instruction::{
+            Register
+        },
+        compiler::{
+            CompilerResult,
+            CompilerError
+        }
+    },
+    parser::{
+        ast::{
+            Type
+        }
+    }
+};
+
 use std::{
     collections::{
-        BTreeMap,
         HashMap
     }
 };
 
-use crate::{
-    parser::{
-        ast::{
-            Type,
-            FunctionDeclArgs
-        }
-    },
-    codegen::{
-        container::{
-            ContainerDef
-        }
-    }
-};
-
-#[derive(Clone, Debug)]
-pub enum VarLocation {
-    Register(u8),
-    Stack(usize)
-}
-
-#[derive(Clone, Debug)]
-pub struct FunctionContext {
-    pub variable_locations: HashMap<String, VarLocation>,
-    pub variable_indices: HashMap<String, i64>,
-    pub variable_types: HashMap<String, Type>,
-    pub functions: HashMap<String, FunctionDeclArgs>,
-    pub return_type: Option<Type>,
-    pub stack_size: usize,
-    pub weak: bool
-}
-
-impl FunctionContext {
-    pub fn new() -> FunctionContext {
-        FunctionContext {
-            variable_locations: HashMap::new(),
-            variable_indices: HashMap::new(),
-            variable_types: HashMap::new(),
-            functions: HashMap::new(),
-            return_type: None,
-            stack_size: 0,
-            weak: false
-        }
-    }
-
-    pub fn new_weak(other: &FunctionContext) -> FunctionContext {
-        let other_size = other.stack_size as i64;
-        
-        let mut context = FunctionContext {
-            variable_locations: HashMap::new(),
-            variable_indices: HashMap::new(),
-            variable_types: HashMap::new(),
-            functions: HashMap::new(),
-            return_type: None,
-            stack_size: 0,
-            weak: true
-        };
-
-        for (var_name, var_index) in other.variable_indices.iter() {
-            context.variable_indices.insert(var_name.clone(), var_index - other_size);    
-        }
-        context.variable_types = other.variable_types.clone();
-        
-        context
-    }
-
-    pub fn type_of(&self, var_name: &String) -> Option<Type> {
-        self.variable_types.get(var_name).cloned()
-    }
-
-    pub fn index_of(&self, var_name: &String) -> Option<i64> {
-        self.variable_indices.get(var_name).cloned()
-    }
-
-    pub fn offset_of(&self, var_name: &String) -> Option<i64> {
-        let var_index_opt = self.variable_indices.get(var_name);
-        if var_index_opt.is_none() {
-            return None;
-        }
-        let var_index = var_index_opt.unwrap();
-        Some(
-            (self.stack_size as i64 - var_index) * -1
-        )
-    }
-
-    pub fn push_var(&mut self, (var_name, var_type): (String, Type)) {
-        let index = self.stack_size as i64;
-        self.variable_indices.insert(var_name.clone(), index);
-        self.variable_types.insert(var_name, var_type);
-    }
-
-    pub fn set_var(&mut self, index: i64, (var_name, var_type): (String, Type)) {
-        self.variable_indices.insert(var_name.clone(), index);
-        self.variable_types.insert(var_name, var_type);
-    }
-}
-
-#[derive(Clone)]
 pub struct ModuleContext {
     pub name: String,
     pub modules: HashMap<String, ModuleContext>,
-    pub functions: HashMap<String, (u64, Type, BTreeMap<usize, (String, Type)>)>,
+    pub functions: HashMap<String, FunctionDef>,
     pub containers: HashMap<String, ContainerDef>,
     pub imports: HashMap<String, String>
 }
 
 impl ModuleContext {
+    /// Creates a new module context
     pub fn new(name: String) -> ModuleContext {
         ModuleContext {
             name: name,
             modules: HashMap::new(),
-            containers: HashMap::new(),
             functions: HashMap::new(),
+            containers: HashMap::new(),
             imports: HashMap::new()
         }
     }
+
+    /// Adds a function definition to a module context.
+    /// Throws a DuplicateFunctionError if a function with the 
+    /// same name already exists.
+    pub fn add_function(&mut self, def: FunctionDef) -> CompilerResult<()> {
+        if self.functions.contains_key(&def.name) {
+            return Err(CompilerError::DuplicateFunction(def.name));
+        }
+        self.functions.insert(def.name.clone(), def);
+        Ok(())
+    }
+
+    /// Adds a module context to a module context.
+    /// Throws a DuplicateModuleError if a module with the
+    /// same name already exists.
+    pub fn add_module(&mut self, mod_ctx: ModuleContext) -> CompilerResult<()> {
+        if self.modules.contains_key(&mod_ctx.name) {
+            return Err(CompilerError::DuplicateModule(mod_ctx.name));
+        }
+        self.modules.insert(mod_ctx.name.clone(), mod_ctx);
+        Ok(())
+    }
+
+    /// Adds a container definition to a module context.
+    /// Throws a DuplicateContainerError if a container with the
+    /// same name already exists.
+    pub fn add_container(&mut self, cont_def: ContainerDef) -> CompilerResult<()> {
+        if self.containers.contains_key(&cont_def.name) {
+            return Err(CompilerError::DuplicateContainer(cont_def.name));
+        }
+        self.containers.insert(cont_def.name.clone(), cont_def);
+        Ok(())
+    }
+
+    /// Adds an import declaration to a module context
+    /// Throws a DuplicateImportError if an import with the same
+    /// "import_as" name already exists.
+    pub fn add_import(&mut self, import_as: String, import_path: String) -> CompilerResult<()> {
+        if self.imports.contains_key(&import_as) {
+            return Err(CompilerError::DuplicateImport(import_as));
+        }
+        self.imports.insert(import_as, import_path);
+        Ok(())
+    }
+
+    /// Gets a mutable reference to a container definition, given the name
+    pub fn get_container(&mut self, name: &String) -> CompilerResult<&mut ContainerDef> {
+        self.containers.get_mut(name)
+            .ok_or(CompilerError::UnknownContainer(name.clone()))
+    }
+
+    /// Gets a reference to the function definition, given the name
+    pub fn get_function(&self, name: &String) -> CompilerResult<&FunctionDef> {
+        self.functions.get(name)
+            .ok_or(CompilerError::UnknownFunction(name.clone()))
+    }
 }
 
-#[derive(Clone)]
-pub enum LoopType {
-    Loop,
-    For,
-    While
+pub enum VariableLocation {
+    Stack(i64),
+    Register(Register)
 }
 
-#[derive(Clone)]
-pub struct LoopContext {
-    pub instr_start: usize,
-    pub loop_type: LoopType,
-    pub break_instr_tags: Vec<u64>
+pub struct FunctionContext {
+    pub def: Option<FunctionDef>,
+    pub weak: bool,
+    pub stack_size: usize,
+    variable_types: HashMap<String, Type>,
+    variable_locations: HashMap<String, Vec<VariableLocation>>
 }
 
-impl LoopContext {
-    pub fn new(instr_start: usize, loop_type: LoopType) -> LoopContext {
-        LoopContext {
-            instr_start: instr_start,
-            loop_type: loop_type,
-            break_instr_tags: Vec::new()
+impl FunctionContext {
+    pub fn new(def: FunctionDef) -> FunctionContext {
+        FunctionContext {
+            def: Some(def),
+            weak: false,
+            stack_size: 0,
+            variable_locations: HashMap::new(),
+            variable_types: HashMap::new()
         }
     }
 
-    pub fn add_break_tag(&mut self, tag: u64) {
-        self.break_instr_tags.push(tag);
+    pub fn set_stack_var(name: String, var_type: Type, stack_pos: usize) -> CompilerResult<()> {
+        Ok(())
     }
 }

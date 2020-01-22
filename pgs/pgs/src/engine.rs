@@ -73,7 +73,7 @@ impl Display for EngineError {
 
 impl Error for EngineError {
 }
-
+/*
 impl Engine {
     pub fn new(stack_size: usize) -> Engine {
         let mut compiler = Compiler::new();
@@ -143,3 +143,4 @@ impl Engine {
             .map_err(|c| Box::new(EngineError::CoreError(c)))
     }
 }
+*/

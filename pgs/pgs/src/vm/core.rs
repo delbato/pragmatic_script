@@ -778,7 +778,7 @@ impl Core {
                     &self.stack
                 },
                 AddressType::Program => {
-                    let program = self.program.as_mut()
+                    let program = self.program.as_ref()
                         .ok_or(CoreError::Unknown)?;
                     &program.code
                 },
