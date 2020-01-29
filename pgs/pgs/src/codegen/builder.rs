@@ -12,7 +12,8 @@ use crate::{
 use std::{
     collections::{
         HashMap
-    }
+    },
+    ops::DerefMut
 };
 
 use serde::{
@@ -26,7 +27,7 @@ pub struct Builder {
     pub instructions: Vec<Instruction>,
     pub jmp_instructions: Vec<usize>,
     labels: HashMap<String, usize>,
-    pub tags: HashMap<u64, usize>
+    pub tags: HashMap<u64, Vec<usize>>
 }
 
 impl Builder {
@@ -45,12 +46,27 @@ impl Builder {
     }
 
     pub fn tag(&mut self, tag: u64) {
-        self.tags.insert(tag, self.instructions.len());
+        let pos = self.instructions.len();
+        if let Some(tag_list) = self.tags.get_mut(&tag) {
+            if !tag_list.contains(&pos) {
+                tag_list.push(pos);
+            }
+        } else {
+            let mut tag_list = Vec::new();
+            tag_list.push(pos);
+            self.tags.insert(tag, tag_list);
+        }
     }
 
-    pub fn get_tag(&mut self, tag: &u64) -> Option<&mut Instruction> {
-        let tag = self.tags.get(tag)?;
-        self.instructions.get_mut(*tag)
+    pub fn get_tag(&mut self, tag: &u64) -> Option<Vec<usize>> {
+        let pos_list = self.tags.get(tag)
+            .cloned()
+            .or(None)?;
+        Some(pos_list)
+    }
+
+    pub fn get_instr(&mut self, offset: &usize) -> Option<&mut Instruction> {
+        self.instructions.get_mut(*offset)
     }
 
     pub fn push_instr(&mut self, instruction: Instruction) {

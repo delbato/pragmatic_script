@@ -28,7 +28,7 @@ fn test_core_addi() {
         .with_operand(0u8)
         .with_operand(1u8)
         .with_operand(0u8);
-    let add_sp_instr = Instruction::new(Opcode::UADDI) // UADDI sp, r2, sp
+    let add_sp_instr = Instruction::new(Opcode::ADDU) // ADDU sp, r2, sp
         .with_operand(16u8)
         .with_operand(2u8)
         .with_operand(16u8);

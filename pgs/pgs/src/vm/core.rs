@@ -91,7 +91,9 @@ pub enum CoreError {
     EmptyCallStack,
     UnknownFunctionUid,
     InvalidStackPointer,
-    InvalidRegister
+    InvalidRegister,
+    NoReturnValue,
+    Halted(u8)
 }
 
 impl Display for CoreError {
@@ -191,7 +193,17 @@ impl Core {
 
             match opcode {
                 Opcode::NOOP => {},
-                Opcode::HALT => { break },
+                Opcode::HALT => {
+                    let err_code: u8 = self.get_op()?;
+                    match err_code {
+                        1 => {
+                            return Err(CoreError::NoReturnValue);
+                        },
+                        _ => {
+                            return Err(CoreError::Halted(err_code))
+                        }
+                    };
+                },
                 Opcode::MOVB => {
                     let lhs: u8 = self.get_op()?;
                     let rhs: u8 = self.get_op()?;
@@ -446,7 +458,7 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs / rhs)
                 },
-                Opcode::UADDI => {
+                Opcode::ADDU => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
@@ -458,7 +470,7 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs + rhs);
                 },
-                Opcode::USUBI => {
+                Opcode::SUBU => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
@@ -470,7 +482,7 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs - rhs)
                 },
-                Opcode::UMULI => {
+                Opcode::MULU => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
@@ -482,7 +494,7 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs * rhs)
                 },
-                Opcode::UDIVI => {
+                Opcode::DIVU => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
                     let target_reg: u8 = self.get_op()?;
@@ -933,7 +945,6 @@ impl Core {
 
         let new_ip = program.functions.get(&fn_uid)
             .ok_or(CoreError::UnknownFunctionUid)?;
-
         
         let old_ip: usize = self.ip.get();
         self.call_stack.push_front(old_ip);

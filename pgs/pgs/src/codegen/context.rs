@@ -4,12 +4,14 @@ use crate::{
             ContainerDef,
             FunctionDef
         },
-        instruction::{
-            Register
+        register::{
+            Register,
+            RegisterAllocator
         },
         compiler::{
             CompilerResult,
-            CompilerError
+            CompilerError,
+            Compiler
         }
     },
     parser::{
@@ -107,26 +109,111 @@ pub enum VariableLocation {
     Register(Register)
 }
 
+#[derive(PartialEq)]
 pub struct FunctionContext {
     pub def: Option<FunctionDef>,
     pub weak: bool,
     pub stack_size: usize,
     variable_types: HashMap<String, Type>,
-    variable_locations: HashMap<String, Vec<VariableLocation>>
+    variable_positions: HashMap<String, i64>,
+    pub register_allocator: RegisterAllocator
 }
 
 impl FunctionContext {
-    pub fn new(def: FunctionDef) -> FunctionContext {
-        FunctionContext {
-            def: Some(def),
-            weak: false,
-            stack_size: 0,
-            variable_locations: HashMap::new(),
-            variable_types: HashMap::new()
+    pub fn new(compiler: &Compiler, def: FunctionDef) -> CompilerResult<FunctionContext> {
+        let mut variable_types = HashMap::new();
+        let mut variable_positions = HashMap::new();
+        let mut pos: i64 = 0;
+
+        for (_, arg_type) in def.arguments.iter().rev() {
+            let size_of_type = compiler.get_size_of_type(arg_type)?;
+            pos -= size_of_type as i64;
         }
+
+        for (arg_name, arg_type) in def.arguments.iter() {
+            let size_of_type = compiler.get_size_of_type(arg_type)?;
+            variable_types.insert(arg_name.clone(), arg_type.clone());
+            variable_positions.insert(arg_name.clone(), pos);
+            pos += size_of_type as i64;
+        }
+
+        Ok(
+            FunctionContext {
+                def: Some(def),
+                weak: false,
+                stack_size: 0,
+                variable_types: variable_types,
+                variable_positions: variable_positions,
+                register_allocator: RegisterAllocator::new()
+            }
+        )
     }
 
-    pub fn set_stack_var(name: String, var_type: Type, stack_pos: usize) -> CompilerResult<()> {
+    pub fn new_weak(fn_ctx: &FunctionContext) -> CompilerResult<FunctionContext> {
+        let stack_size = fn_ctx.stack_size as i64;
+
+        let mut variable_positions = HashMap::new();
+
+        for (var_name, var_pos) in fn_ctx.variable_positions.iter() {
+            let var_offset = var_pos - stack_size;
+            if var_offset >= 0 {
+                return Err(CompilerError::Unknown);
+            }
+            variable_positions.insert(var_name.clone(), var_offset);
+        }
+
+        Ok(
+            FunctionContext {
+                def: None,
+                weak: true,
+                stack_size: 0,
+                variable_types: fn_ctx.variable_types.clone(),
+                variable_positions: variable_positions,
+                register_allocator: RegisterAllocator::new()
+            }
+        )
+    }
+
+    pub fn set_stack_var(&mut self, (var_name, var_type): (String, Type), stack_pos: i64) -> CompilerResult<()> {
+        if self.variable_types.contains_key(&var_name) {
+            return Err(CompilerError::DuplicateVariable(var_name));
+        } else if self.variable_positions.contains_key(&var_name) {
+            return Err(CompilerError::DuplicateVariable(var_name));
+        }
+        self.variable_types.insert(var_name.clone(), var_type);
+        self.variable_positions.insert(var_name, stack_pos);
         Ok(())
+    }
+
+    pub fn get_var_type(&self, var_name: &String) -> CompilerResult<Type> {
+        self.variable_types.get(var_name)
+            .cloned()
+            .ok_or(CompilerError::UnknownVariable(var_name.clone()))
+    }
+
+    pub fn get_var_loc(&self, var_name: &String) -> CompilerResult<VariableLocation> {
+        /*let reg_res = self.register_allocator.get_permanent(var_name);
+        if reg_res.is_ok() {
+            return Ok(VariableLocation::Register(reg_res.unwrap()));
+        }*/
+        let position = self.variable_positions.get(var_name)
+            .ok_or(CompilerError::UnknownVariable(var_name.clone()))?;
+        Ok(
+            VariableLocation::Stack(*position)
+        )
+    }
+
+    pub fn get_var_pos(&self, var_name: &String) -> CompilerResult<i64> {
+        self.variable_positions.get(var_name)
+            .cloned()
+            .ok_or(CompilerError::UnknownVariable(var_name.clone()))
+    }
+
+    pub fn get_ret_type(&self) -> CompilerResult<Type> {
+        let fn_def = self.def.as_ref()
+            .ok_or(CompilerError::Unknown)?;
+        Ok(
+            fn_def.ret_type.clone()
+        )
     }
 }

@@ -13,3 +13,5 @@ pub mod data;
 pub mod uid_generator;
 
 pub mod def;
+
+pub mod register;

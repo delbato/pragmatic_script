@@ -166,19 +166,26 @@ pub struct VariableDeclArgs {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+pub struct IfStatementArgs {
+    pub if_expr: Expression,
+    pub if_block: Vec<Statement>,
+    pub else_block: Option<Vec<Statement>>,
+    pub else_if_list: Option<Vec<(Expression, Vec<Statement>)>>
+}
+
+#[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
     VariableDecl(VariableDeclArgs),
     Assignment(String, Box<Expression>),
     Call(String, Vec<Expression>),
     Return(Option<Expression>),
+    CodeBlock(Vec<Statement>),
     Loop(Vec<Statement>),
     While(Box<Expression>, Vec<Statement>),
     Break,
     Continue,
     Expression(Expression),
-    If(Box<Expression>, Vec<Statement>),
-    IfElse(Box<Expression>, Vec<Statement>, Vec<Statement>),
-    IfElseIf(Box<Expression>, Vec<Statement>, Vec<(Box<Expression>, Vec<Statement>)>)
+    If(IfStatementArgs)
 }
 
 #[derive(PartialEq, Debug, Clone)]

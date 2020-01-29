@@ -68,8 +68,8 @@ pub enum ParseErrorType {
     ExpectedIf,
     ExpectedImpl,
     ExpectedImplType,
-    ExpectedSelf,
-    SelfOnlyAllowedInImpls,
+    ExpectedThis,
+    ThisOnlyAllowedInImpls,
     MalformedImport
 }
 
@@ -592,14 +592,14 @@ impl Parser {
         if lexer.token == Token::And {
             // Swallow "&"
             lexer.advance();
-            if lexer.token != Token::Text || lexer.slice() != "self" {
-                return make_parse_error!(lexer, ParseErrorType::ExpectedSelf);
+            if lexer.token != Token::Text || lexer.slice() != "this" {
+                return make_parse_error!(lexer, ParseErrorType::ExpectedThis);
             }
             
-            let arg_name = String::from("self");
+            let arg_name = String::from("this");
             let cont_name = self.current_cont.borrow().clone();
             if cont_name.is_empty() {
-                return make_parse_error!(lexer, ParseErrorType::SelfOnlyAllowedInImpls);
+                return make_parse_error!(lexer, ParseErrorType::ThisOnlyAllowedInImpls);
             }
             let arg_type = Type::Reference(Box::new(Type::Other(cont_name)));
 
@@ -846,8 +846,69 @@ impl Parser {
         // Swallow "}"
         lexer.advance();
 
+        let mut else_ifs = Vec::new();
+        let mut else_stmt_list = Vec::new();
+
+        while lexer.token == Token::Else {
+            // Swallow "else"
+            lexer.advance();
+
+            if lexer.token == Token::If {
+                // Swallow "if" 
+                lexer.advance();
+
+                let else_if_expr = self.parse_expr(lexer, &[
+                    Token::OpenBlock
+                ])?;
+
+                if lexer.token != Token::OpenBlock {
+                    return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
+                }
+                // Swallow "{"
+                lexer.advance();
+
+                let else_if_stmt_list = self.parse_statement_list(lexer)?;
+
+                // Swallow "}"
+                lexer.advance();
+
+                else_ifs.push((else_if_expr, else_if_stmt_list));
+            } else {
+                if lexer.token != Token::OpenBlock {
+                    return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
+                }
+                // Swallow "{"
+                lexer.advance();
+                
+                else_stmt_list = self.parse_statement_list(lexer)?;
+                
+                // Swallow "}"
+                lexer.advance();
+
+                // Break because else is only allowed at the end
+                break;
+            }
+        }
+
+        let mut else_if_list_opt = None;
+        if else_ifs.len() > 0 {
+            else_if_list_opt = Some(else_ifs);
+        }
+
+        let mut else_opt = None;
+        if else_stmt_list.len() > 0 {
+            else_opt = Some(else_stmt_list);
+        }
+
+        let if_stmt_args = IfStatementArgs {
+            if_expr: if_expr,
+            if_block: stmt_list,
+            else_block: else_opt,
+            else_if_list: else_if_list_opt
+        };
+
         Ok(
-            Statement::If(Box::new(if_expr), stmt_list)
+            Statement::If(if_stmt_args)
         )
     }
 

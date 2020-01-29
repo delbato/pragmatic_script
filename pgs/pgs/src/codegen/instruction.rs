@@ -1,6 +1,9 @@
 use crate::{
     vm::{
         is::Opcode
+    },
+    codegen::{
+        register::Register
     }
 };
 
@@ -14,27 +17,6 @@ use bincode::{
     deserialize,
     serialize
 };
-
-pub enum Register {
-    R0 = 0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    R7,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15,
-    SP,
-    IP
-}
 
 #[derive(Clone, Debug)]
 pub struct Instruction {
@@ -50,32 +32,18 @@ impl Instruction {
         }
     }
 
-    pub fn new_inc_stack(inc: usize) -> Vec<Instruction> {
-        let mut ret = Vec::new();
-        let lda_instr = Instruction::new(Opcode::LDA)
-            .with_operand(15u8)
-            .with_operand(inc as u64);
-        let add_instr = Instruction::new(Opcode::UADDI)
-            .with_operand(16u8)
-            .with_operand(15u8)
-            .with_operand(16u8);
-        ret.push(lda_instr);
-        ret.push(add_instr);
-        ret
+    pub fn new_inc_stack(inc: usize) -> Instruction {
+        Instruction::new(Opcode::ADDU_I)
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<u64>(inc as u64)
+            .with_operand::<u8>(Register::SP.into())
     }
 
-    pub fn new_dec_stack(dec: usize) -> Vec<Instruction> {
-        let mut ret = Vec::new();
-        let lda_instr = Instruction::new(Opcode::LDA)
-            .with_operand(15u8)
-            .with_operand(dec as u64);
-        let add_instr = Instruction::new(Opcode::USUBI)
-            .with_operand(16u8)
-            .with_operand(15u8)
-            .with_operand(16u8);
-        ret.push(lda_instr);
-        ret.push(add_instr);
-        ret
+    pub fn new_dec_stack(dec: usize) -> Instruction {
+        Instruction::new(Opcode::SUBU_I)
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<u64>(dec as u64)
+            .with_operand::<u8>(Register::SP.into())
     }
 
     pub fn with_operand<T: Serialize>(mut self, operand: T) -> Instruction {
@@ -87,6 +55,10 @@ impl Instruction {
     pub fn append_operand<T: Serialize>(&mut self, operand: T) {
         let mut data = serialize(&operand).expect("ERROR Serializing operand!");
         self.operands.append(&mut data);
+    }
+
+    pub fn remove_operand_bytes(&mut self, n: usize) {
+        self.operands.truncate(self.operands.len() - n);
     }
 
     pub fn clear_operands(&mut self) {
@@ -110,8 +82,8 @@ impl Instruction {
         self.operands.len() + 1
     }
 
-    pub fn get_operand<T: DeserializeOwned>(&self) -> T {
-        let t = deserialize(&self.operands).expect("ERROR Deserializing operand!");
+    pub fn get_operand<T: DeserializeOwned>(&self, offset: usize, size: usize) -> T {
+        let t = deserialize(&self.operands[offset..offset + size]).expect("ERROR Deserializing operand!");
         t
     }
 }

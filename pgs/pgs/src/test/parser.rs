@@ -453,24 +453,6 @@ fn test_parse_mod_decl() {
 }
 
 #[test]
-fn test_parse_if() {
-    let code = String::from("
-        if true {
-            var x: int = 0;
-        }
-    ");
-
-    let parser = Parser::new(code.clone());
-    let mut lexer = Token::lexer(code.as_str());
-    let stmt_res = parser.parse_if(&mut lexer);
-    assert!(stmt_res.is_ok());
-
-    if let Statement::If(expr_box, stmt_list) = stmt_res.unwrap() {
-        println!("if expr: {:?}", *expr_box);
-    }
-}
-
-#[test]
 fn test_parse_while() {
     let code = String::from("
         while true {
@@ -505,6 +487,86 @@ fn test_parse_loop() {
     if let Statement::Loop(stmt_list) = stmt_res.unwrap() {
         println!("loop stmt list: {:?}", stmt_list);
     }
+}
+
+#[test]
+fn test_parse_if() {
+    let code = String::from("
+        if false {
+            var x: int = 0;
+            x += 2;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_if(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    println!("{:?}", stmt_res.unwrap());
+}
+
+#[test]
+fn test_parse_if_else() {
+    let code = String::from("
+        if false {
+            var x: int = 0;
+            x += 2;
+        } else {
+            var x: int = 0;
+            x += 1;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_if(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    println!("{:?}", stmt_res.unwrap());
+}
+
+#[test]
+fn test_parse_if_else_if() {
+    let code = String::from("
+        if false {
+            var x: int = 0;
+            x += 2;
+        } else if true {
+            var x: int = 0;
+            x += 1;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_if(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    println!("{:?}", stmt_res.unwrap());
+}
+
+#[test]
+fn test_parse_if_else_if_else() {
+    let code = String::from("
+        if false {
+            var x: int = 0;
+            x += 2;
+        } else if true {
+            var x: int = 0;
+            x += 1;
+        } else {
+            var x: int = 0;
+            x += 3;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    let stmt_res = parser.parse_if(&mut lexer);
+    assert!(stmt_res.is_ok());
+
+    println!("{:?}", stmt_res.unwrap());
 }
 
 #[test]

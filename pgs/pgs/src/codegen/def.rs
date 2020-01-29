@@ -9,7 +9,8 @@ use crate::{
     codegen::{
         compiler::{
             CompilerResult,
-            CompilerError
+            CompilerError,
+            Compiler
         }
     }
 };
@@ -24,12 +25,12 @@ use std::{
 };
 
 /// A function definition
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: String,
     pub uid: u64,
     pub ret_type: Type,
-    pub arguments: Vec<Type>
+    pub arguments: Vec<(String, Type)>
 }
 
 impl FunctionDef {
@@ -52,7 +53,7 @@ impl FunctionDef {
     /// With decl args arguments
     pub fn with_arguments(mut self, arguments: &[(String, Type)]) -> FunctionDef {
         for argument in arguments.iter() {
-            self.arguments.push(argument.1.clone());
+            self.arguments.push(argument.clone());
         }
         self
     }
@@ -106,6 +107,15 @@ impl ContainerDef {
         }
         self.member_functions.insert(fn_def.name.clone(), fn_def);
         Ok(())
+    }
+
+    /// Returns the byte size of this container
+    pub fn get_size(&self, compiler: &Compiler) -> CompilerResult<usize> {
+        let mut size = 0;
+        for (_, var_type) in self.member_variables.iter() {
+            size += compiler.get_size_of_type(var_type)?;
+        }
+        Ok(size)
     }
 }
 
