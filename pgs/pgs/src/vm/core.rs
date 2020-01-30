@@ -145,7 +145,9 @@ impl Core {
 
     #[inline]
     pub fn get_stack_size(&self) -> usize {
-        self.sp.get()
+        let sp_raw: u64 = self.sp.get();
+        let sp_addr = Address::from(sp_raw);
+        sp_addr.real_address as usize
     }
 
     #[inline]
@@ -458,6 +460,42 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs / rhs)
                 },
+                Opcode::ADDI_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: i64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs + rhs);
+                },
+                Opcode::SUBI_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: i64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs - rhs);
+                },
+                Opcode::MULI_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: i64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs * rhs);
+                },
+                Opcode::DIVI_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: i64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: i64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs / rhs);
+                },
                 Opcode::ADDU => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
@@ -506,6 +544,42 @@ impl Core {
                     };
                     self.reg(target_reg)?.set(lhs / rhs)
                 },
+                Opcode::ADDU_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: u64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs + rhs);
+                },
+                Opcode::SUBU_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: u64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs - rhs);
+                },
+                Opcode::MULU_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: u64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs * rhs);
+                },
+                Opcode::DIVU_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: u64 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: u64 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs / rhs);
+                },
                 Opcode::ADDF => {
                     let lhs_reg: u8 = self.get_op()?;
                     let rhs_reg: u8 = self.get_op()?;
@@ -551,6 +625,42 @@ impl Core {
                     };
                     let rhs: f32 = {
                         self.reg(rhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs / rhs);
+                },
+                Opcode::ADDF_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: f32 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs + rhs);
+                },
+                Opcode::SUBF_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: f32 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs - rhs);
+                },
+                Opcode::MULF_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: f32 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs * rhs);
+                },
+                Opcode::DIVF_I => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs: f32 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: f32 = {
+                        self.reg(lhs_reg)?.get()
                     };
                     self.reg(target_reg)?.set(lhs / rhs);
                 },
@@ -615,6 +725,10 @@ impl Core {
                     self.call()?;
                 },
                 Opcode::RET => {
+                    // Special case if function was called externally, the callstack is empty
+                    if self.call_stack.len() == 0 {
+                        break;
+                    }
                     self.ret()?;
                 },
                 Opcode::NOT => {

@@ -109,7 +109,7 @@ pub enum VariableLocation {
     Register(Register)
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct FunctionContext {
     pub def: Option<FunctionDef>,
     pub weak: bool,
@@ -215,5 +215,19 @@ impl FunctionContext {
         Ok(
             fn_def.ret_type.clone()
         )
+    }
+}
+
+pub struct LoopContext {
+    pub instr_start: usize,
+    pub instr_end: usize
+}
+
+impl LoopContext {
+    pub fn new(start: usize) -> LoopContext {
+        LoopContext {
+            instr_start: start,
+            instr_end: start
+        }
     }
 }

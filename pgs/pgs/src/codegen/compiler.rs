@@ -3,7 +3,8 @@ use crate::{
         context::{
             ModuleContext,
             FunctionContext,
-            VariableLocation
+            VariableLocation,
+            LoopContext
         },
         uid_generator::UIDGenerator,
         def::{
@@ -93,6 +94,7 @@ pub type CompilerResult<T> = Result<T, CompilerError>;
 pub struct Compiler {
     fn_context_stack: VecDeque<FunctionContext>,
     mod_context_stack: VecDeque<ModuleContext>,
+    loop_ctx_stack: VecDeque<LoopContext>,
     fn_uid_map: HashMap<String, u64>,
     uid_generator: UIDGenerator,
     builder: Builder,
@@ -109,6 +111,7 @@ impl Compiler {
         Compiler {
             fn_context_stack: VecDeque::new(),
             mod_context_stack: mod_context_stack,
+            loop_ctx_stack: VecDeque::new(),
             fn_uid_map: HashMap::new(),
             uid_generator: UIDGenerator::new(),
             builder: Builder::new(),
@@ -232,6 +235,24 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Pushes a loop context on the stack
+    pub fn push_loop_context(&mut self, loop_ctx: LoopContext) {
+        self.loop_ctx_stack.push_front(loop_ctx);
+    }
+    
+    /// Pops the front loop context off the stack
+    pub fn pop_loop_context(&mut self) -> CompilerResult<LoopContext> {
+        self.loop_ctx_stack.pop_front()
+            .ok_or(CompilerError::Unknown)
+    }
+
+    /// Gets a functions uid  by name
+    pub fn get_function_uid(&self, name: &String) -> CompilerResult<u64> {
+        self.fn_uid_map.get(name)
+            .cloned()
+            .ok_or(CompilerError::UnknownFunction(name.clone()))
+    }
+
     /// Resolves a function by name to a FunctionDef
     pub fn resolve_function(&self, name: &String) -> CompilerResult<FunctionDef> {
         Err(CompilerError::Unimplemented(format!("Function resolving not implemented yet!")))
@@ -305,6 +326,7 @@ impl Compiler {
     pub fn inc_stack(&mut self, size: usize) -> CompilerResult<usize> {
         let fn_ctx = self.get_current_function_mut()?;
         fn_ctx.stack_size += size;
+        //println!("Incrementing stack of {:?} by {}", fn_ctx, size);
         Ok(fn_ctx.stack_size)
     }
 
@@ -312,6 +334,12 @@ impl Compiler {
     pub fn dec_stack(&mut self, size: usize) -> CompilerResult<usize> {
         let fn_ctx = self.get_current_function_mut()?;
         fn_ctx.stack_size -= size;
+        Ok(fn_ctx.stack_size)
+    }
+
+    /// Gets the stack size of the current function context
+    pub fn get_stack_size(&self) -> CompilerResult<usize> {
+        let fn_ctx = self.get_current_function()?;
         Ok(fn_ctx.stack_size)
     }
 
@@ -523,6 +551,8 @@ impl Compiler {
     pub fn compile_stack_cleanup(&mut self, fn_ctx: &FunctionContext) -> CompilerResult<()> {
         let pop_size = fn_ctx.stack_size;
 
+        //println!("Compiling stack cleanup with stack size {}", pop_size);
+
         // Instruction for popping values off the stack
         let pop_stack_instr = Instruction::new(Opcode::SUBU_I)
             .with_operand::<u8>(Register::SP.into())
@@ -716,7 +746,22 @@ impl Compiler {
 
     /// Compiles a statement expression
     pub fn compile_expr_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
-        Err(CompilerError::Unimplemented(format!("Statement expr compilation not implemented!")))
+        let stmt_expr = match stmt {
+            Statement::Expression(expr) => expr,
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        match stmt_expr {
+            Expression::Assign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
+            Expression::AddAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
+            Expression::SubAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
+            Expression::MulAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
+            Expression::DivAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
+            _ => return Err(CompilerError::UnsupportedExpression(stmt_expr.clone()))
+        };
+
+        Ok(())
+        //Err(CompilerError::Unimplemented(format!("Statement expr compilation not implemented!")))
     }
 
     /// Compiles an if statement
@@ -1028,12 +1073,7 @@ impl Compiler {
     }
 
     /// Compiles a variable assign statement expression
-    pub fn compile_var_assign_expr_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
-        let assign_expr = match stmt {
-            Statement::Expression(expr) => expr,
-            _ => return Err(CompilerError::Unknown)
-        };
-
+    pub fn compile_var_assign_stmt_expr(&mut self, assign_expr: &Expression) -> CompilerResult<()> {
         let (lhs_expr, rhs_expr) = match assign_expr {
             Expression::Assign(lhs, rhs) => (lhs.deref().clone(), rhs.deref().clone()),
             Expression::AddAssign(lhs, rhs) => {
@@ -1058,13 +1098,24 @@ impl Compiler {
         // Compile the left hand side of this expression
         let lhs_expr_type = self.compile_lhs_assign_expr(&lhs_expr)?;
         // Get the result register
-        // And block it from use
-        let lhs_reg = {
+        let mut lhs_reg = {
             let fn_ctx = self.get_current_function_mut()?;
-            let lhs_reg = fn_ctx.register_allocator.get_last_temp_register()?;
-            fn_ctx.register_allocator.block_register(lhs_reg.clone())?;
-            lhs_reg
+            fn_ctx.register_allocator.get_last_temp_register()?
         };
+
+        // Save the result pointer to the stack;
+        let stack_inc_instr = Instruction::new_inc_stack(8);
+        self.builder.push_instr(stack_inc_instr);
+        let save_stack_instr = Instruction::new(Opcode::MOVA_RA)
+            .with_operand::<u8>(lhs_reg.into())
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<i16>(-8);
+        self.builder.push_instr(save_stack_instr);
+        let lhs_ptr_pos = {
+            self.get_current_function()?
+                .stack_size
+        };
+        self.inc_stack(8)?;
 
         // Check the type of the rhs expression
         let rhs_expr_type = self.check_expr_type(&rhs_expr)?;
@@ -1082,6 +1133,24 @@ impl Compiler {
             let fn_ctx = self.get_current_function()?;
             fn_ctx.register_allocator.get_last_temp_register()?
         };
+
+        lhs_reg = {
+            let fn_ctx = self.get_current_function_mut()?;
+            fn_ctx.register_allocator.get_temp_register()?
+        };
+
+        let stack_offset: i16 = {
+            let curr_stack_size = self.get_current_function()?
+                .stack_size;
+            -((curr_stack_size - lhs_ptr_pos) as i16)
+        };
+
+        // Move the pointer from the stack into the lhs register
+        let mov_stack_instr = Instruction::new(Opcode::MOVA_AR)
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<i16>(stack_offset)
+            .with_operand::<u8>(lhs_reg.clone().into());
+        self.builder.push_instr(mov_stack_instr);
 
         // Move the value to the assignment destination
         let assign_instr = match rhs_expr_type {
@@ -1133,9 +1202,8 @@ impl Compiler {
         };
 
         self.builder.push_instr(assign_instr);
-
-
-        Err(CompilerError::Unimplemented(format!("Var assign compilation not implemented!")))
+        Ok(())
+        //Err(CompilerError::Unimplemented(format!("Var assign compilation not implemented!")))
     }
 
     /// Compiles the left hand side of an assignment expression
@@ -1388,25 +1456,234 @@ impl Compiler {
                             let fn_ctx = self.get_current_function_mut()?;
                             fn_ctx.register_allocator.get_temp_register()?
                         };
-                        let divi_instr = Instruction::new(Opcode::LTI)
+                        let lti_instr = Instruction::new(Opcode::LTI)
                             .with_operand::<u8>(lhs_reg.into())
                             .with_operand::<u8>(rhs_reg.into())
                             .with_operand::<u8>(res_reg.into());
-                        self.builder.push_instr(divi_instr);
+                        self.builder.push_instr(lti_instr);
                     },
                     Type::Float => {
                         let res_reg = {
                             let fn_ctx = self.get_current_function_mut()?;
                             fn_ctx.register_allocator.get_temp_register()?
                         };
-                        let divf_instr = Instruction::new(Opcode::LTF)
+                        let ltf_instr = Instruction::new(Opcode::LTF)
                             .with_operand::<u8>(lhs_reg.into())
                             .with_operand::<u8>(rhs_reg.into())
                             .with_operand::<u8>(res_reg.into());
-                        self.builder.push_instr(divf_instr);
+                        self.builder.push_instr(ltf_instr);
                     },
                     _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
                 };
+            },
+
+            Expression::GreaterThan(lhs, rhs) => {
+                let expr_type = self.check_expr_type(lhs)?;
+                self.compile_expr(lhs)?;
+                let lhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                self.compile_expr(rhs)?;
+                let rhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                match expr_type {
+                    Type::Int => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let gti_instr = Instruction::new(Opcode::GTI)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(gti_instr);
+                    },
+                    Type::Float => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let gtf_instr = Instruction::new(Opcode::GTF)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(gtf_instr);
+                    },
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
+                };
+            },
+
+            Expression::LessThanEquals(lhs, rhs) => {
+                let expr_type = self.check_expr_type(lhs)?;
+                self.compile_expr(lhs)?;
+                let lhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                self.compile_expr(rhs)?;
+                let rhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                match expr_type {
+                    Type::Int => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let lteqi_instr = Instruction::new(Opcode::LTEQI)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(lteqi_instr);
+                    },
+                    Type::Float => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let lteqf_instr = Instruction::new(Opcode::LTEQF)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(lteqf_instr);
+                    },
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
+                };
+            },
+
+            Expression::GreaterThanEquals(lhs, rhs) => {
+                let expr_type = self.check_expr_type(lhs)?;
+                self.compile_expr(lhs)?;
+                let lhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                self.compile_expr(rhs)?;
+                let rhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                match expr_type {
+                    Type::Int => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let gteqi_instr = Instruction::new(Opcode::GTEQI)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(gteqi_instr);
+                    },
+                    Type::Float => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let gteqf_instr = Instruction::new(Opcode::GTEQF)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(gteqf_instr);
+                    },
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
+                };
+            },
+
+            Expression::Equals(lhs, rhs) => {
+                let expr_type = self.check_expr_type(lhs)?;
+                self.compile_expr(lhs)?;
+                let lhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                self.compile_expr(rhs)?;
+                let rhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                match expr_type {
+                    Type::Int => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let eqi_instr = Instruction::new(Opcode::EQI)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(eqi_instr);
+                    },
+                    Type::Float => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let eqf_instr = Instruction::new(Opcode::EQF)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(eqf_instr);
+                    },
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
+                };
+            },
+
+            Expression::NotEquals(lhs, rhs) => {
+                let expr_type = self.check_expr_type(lhs)?;
+                self.compile_expr(lhs)?;
+                let lhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                self.compile_expr(rhs)?;
+                let rhs_reg = {
+                    let fn_ctx = self.get_current_function()?;
+                    fn_ctx.register_allocator.get_last_temp_register()?
+                };
+                match expr_type {
+                    Type::Int => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let neqi_instr = Instruction::new(Opcode::NEQI)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(neqi_instr);
+                    },
+                    Type::Float => {
+                        let res_reg = {
+                            let fn_ctx = self.get_current_function_mut()?;
+                            fn_ctx.register_allocator.get_temp_register()?
+                        };
+                        let neqf_instr = Instruction::new(Opcode::NEQF)
+                            .with_operand::<u8>(lhs_reg.into())
+                            .with_operand::<u8>(rhs_reg.into())
+                            .with_operand::<u8>(res_reg.into());
+                        self.builder.push_instr(neqf_instr);
+                    },
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
+                };
+            },
+
+            Expression::Not(op) => {
+                self.compile_expr(op)?;
+                let (op_reg, target_reg) = {
+                    let fn_ctx = self.get_current_function_mut()?;
+                    let op_reg = fn_ctx.register_allocator.get_last_temp_register()?;
+                    let target_reg = fn_ctx.register_allocator.get_temp_register()?;
+                    (op_reg, target_reg)
+                };
+                let not_instr = Instruction::new(Opcode::NOT)
+                    .with_operand::<u8>(op_reg.into())
+                    .with_operand::<u8>(target_reg.into());
+                self.builder.push_instr(not_instr);
             },
             _ => return Err(CompilerError::UnsupportedExpression(expr.clone()))
         };

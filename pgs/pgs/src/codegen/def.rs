@@ -25,7 +25,7 @@ use std::{
 };
 
 /// A function definition
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct FunctionDef {
     pub name: String,
     pub uid: u64,

@@ -85,3 +85,34 @@ fn test_compile_if() {
         println!("{:?}", instr);
     }
 }
+
+#[test]
+fn test_compile_var_assign() {
+    let code = String::from("
+        fn: main() {
+            var x: int = 0;
+            if x < 1 {
+                x += 1;
+            }
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[]);
+    assert!(decl_list_res.is_ok());
+
+    let decl_list = decl_list_res.unwrap();
+
+    let mut compiler = Compiler::new();
+    let compile_res = compiler.compile_root(&decl_list);
+    println!("{:?}", compile_res);
+    assert!(compile_res.is_ok());
+
+    let builder = compiler.get_builder();
+
+    for instr in builder.instructions.iter() {
+        println!("{:?}", instr);
+    }
+}

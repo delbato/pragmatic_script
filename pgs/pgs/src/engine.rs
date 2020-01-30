@@ -3,6 +3,10 @@ use crate::{
         core::{
             Core,
             CoreError
+        },
+        register::{
+            RegisterAccess,
+            Register as RegisterUnion
         }
     },
     parser::{
@@ -19,7 +23,8 @@ use crate::{
         compiler::{
             Compiler,
             CompilerError
-        }
+        },
+        register::Register
     },
     api::{
         module::Module
@@ -73,11 +78,10 @@ impl Display for EngineError {
 
 impl Error for EngineError {
 }
-/*
+
 impl Engine {
     pub fn new(stack_size: usize) -> Engine {
         let mut compiler = Compiler::new();
-        compiler.push_default_module_context();
         Engine {
             core: Core::new(stack_size),
             compiler: compiler
@@ -93,7 +97,7 @@ impl Engine {
         let parser = Parser::new(String::from(code));
         let decl_list = parser.parse_root_decl_list()
             .map_err(|p| Box::new(EngineError::ParseError(p)))?;
-        self.compiler.compile_root_decl_list(decl_list)
+        self.compiler.compile_root(&decl_list)
             .map_err(|c| Box::new(EngineError::CompileError(c)))?;
         let program = self.compiler.get_program()
             .map_err(|c| Box::new(EngineError::CompileError(c)))?;
@@ -126,21 +130,22 @@ impl Engine {
             .map_err(|c| Box::new(EngineError::CoreError(c)))
     }
 
+    pub fn get_register_value<T>(&mut self, reg: Register) -> EngineResult<T>
+        where RegisterUnion: RegisterAccess<T> {
+        let val = self.core.reg(reg.into())
+            .map_err(|ce| EngineError::CoreError(ce))?
+            .get::<T>();
+        Ok(val)
+    }
+
     pub fn get_stack_size(&self) -> usize {
         self.core.get_stack_size()
     }
 
     pub fn run_fn(&mut self, name: &String) -> EngineResult<()> {
-        let fn_uid = self.compiler.get_function_uid(name);
+        let fn_uid = self.compiler.get_function_uid(name)
+            .map_err(|ce| EngineError::CompileError(ce))?;
         self.core.run_fn(fn_uid)
             .map_err(|c| Box::new(EngineError::CoreError(c)))
     }
-
-    pub fn register_module(&mut self, mut module: Module) -> EngineResult<()> {
-        self.compiler.register_foreign_module(&mut module, String::new())
-            .map_err(|c| Box::new(EngineError::CompileError(c)))?;
-        self.core.register_foreign_module(module)
-            .map_err(|c| Box::new(EngineError::CoreError(c)))
-    }
 }
-*/

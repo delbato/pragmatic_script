@@ -22,7 +22,7 @@ use std::{
 use epd::*;
 use num_traits::FromPrimitive;
 
-#[derive(Clone, PartialEq, Eq, Hash, Primitive)]
+#[derive(Clone, PartialEq, Eq, Hash, Primitive, Debug)]
 pub enum Register {
     R0 = 0,
     R1 = 1,
@@ -56,7 +56,7 @@ impl Into<u8> for Register {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct RegisterAllocator {
     register_queue: VecDeque<Register>,
     blocked_registers: HashSet<Register>
