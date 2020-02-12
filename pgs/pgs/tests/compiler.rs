@@ -1,4 +1,5 @@
-use crate::{
+extern crate pgs;
+use pgs::{
     codegen::{
         compiler::{
             Compiler
@@ -114,5 +115,73 @@ fn test_compile_var_assign() {
 
     for instr in builder.instructions.iter() {
         println!("{:?}", instr);
+    }
+}
+
+#[test]
+fn test_compile_auto_var() {
+    let code = String::from("
+        fn: main() {
+            var x = 0;
+            if x < 1 {
+                x += 1;
+            }
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[]);
+    assert!(decl_list_res.is_ok());
+
+    let decl_list = decl_list_res.unwrap();
+
+    let mut compiler = Compiler::new();
+    let compile_res = compiler.compile_root(&decl_list);
+    println!("{:?}", compile_res);
+    assert!(compile_res.is_ok());
+
+    let builder = compiler.get_builder();
+
+    for instr in builder.instructions.iter() {
+        println!("{:?}", instr);
+    }
+}
+
+#[test]
+fn test_compile_while_stmt() {
+    let code = String::from("
+        fn: main() {
+            var x = 0.0;
+            while x < 10.0 {
+                if x == 7.0 {
+                    break;
+                }
+                x += 1.0;
+            }
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[]);
+    assert!(decl_list_res.is_ok());
+
+    let decl_list = decl_list_res.unwrap();
+
+    let mut compiler = Compiler::new();
+    let compile_res = compiler.compile_root(&decl_list);
+    println!("{:?}", compile_res);
+    assert!(compile_res.is_ok());
+
+    let builder = compiler.get_builder();
+
+    let mut pos = 0;
+
+    for instr in builder.instructions.iter() {
+        println!("{}:  {:?}", pos, instr);
+        pos += instr.get_size();
     }
 }

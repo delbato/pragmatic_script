@@ -1,87 +1,81 @@
 use crate::{
-    vm::{
-        core::{
-            Core
-        }
-    },
-    parser::{
-        ast::Type
-    },
     api::{
-        error::{
-            APIResult,
-            APIError
+        function::{
+            Function
         }
     },
     codegen::{
         register::{
             Register
         }
-    }
-};
-
-use std::{
-    collections::{
-        HashMap
+    },
+    vm::{
+        core::{
+            Core
+        },
+        register::{
+            Register as RegisterUnion,
+            RegisterAccess
+        }
     }
 };
 
 use serde::{
-    de::{
-        DeserializeOwned
-    },
-    Serialize
+    de::DeserializeOwned
 };
 
 pub struct Adapter<'c> {
-    core: &'c mut Core,
-    fn_signature: Option<HashMap<usize, i64>>
+    pub function: Function,
+    pub core: &'c mut Core
 }
 
 impl<'c> Adapter<'c> {
-    /// Creates a new Adapter instance
-    pub fn new(core: &'c mut Core) -> Adapter {
+    pub fn new(func: &Function, core: &'c mut Core) -> Adapter<'c> {
         Adapter {
-            core: core,
-            fn_signature: None
+            function: func.clone(),
+            core: core
         }
     }
 
-    /// With a function signature
-    pub fn with_fn_signature(mut self, fn_signature: Vec<usize>) -> Adapter<'c> {
-        let mut signature = HashMap::new();
-        let mut stack_index = 0;
-        let mut arg_index = fn_signature.len();
-        for arg_size in fn_signature.into_iter().rev() {
-            stack_index -= arg_size as isize;
-            arg_index -= 1;
-            signature.insert(arg_index, stack_index as i64);
-        }
-        self.fn_signature = Some(signature);
-        self
+    pub fn get_arg<T>(&mut self, arg_index: usize) -> T
+    where T: FromArg {
+        T::get(self, arg_index)
     }
 
-    pub fn get_arg<T: DeserializeOwned>(&mut self, arg_index: usize) -> APIResult<T> {
-        let arg_offset = {
-            let fn_sig = self.fn_signature.as_ref()
-                .ok_or(APIError::NoFnSignature)?;
-            fn_sig.get(&arg_index)
-                .cloned()
-                .ok_or(APIError::Unknown)?
-        };
-
-        let sp = {
-            self.core.reg(Register::SP.into())
-                .map_err(|_| APIError::Unknown)?
-                .get::<u64>()
-        };
-
-        self.core.mem_get((sp, arg_offset as i16))
-            .map_err(|_| APIError::ArgDeserializeError)
+    pub fn return_value<T>(&mut self, value: T)
+    where RegisterUnion: RegisterAccess<T> {
+        self.core.reg(Register::R0.into()).unwrap().set::<T>(value);
     }
+}
 
-    pub fn push_stack<T: Serialize>(&mut self, item: T) -> APIResult<()> {
-        self.core.push_stack(item)
-            .map_err(|_| APIError::ArgSerializeError)
+pub trait FromArg: DeserializeOwned {
+    fn get(adapter: &mut Adapter, arg_index: usize) -> Self;
+}
+
+impl FromArg for String {
+    fn get(adapter: &mut Adapter, arg_index: usize) -> String {
+        let arg_offset = adapter.function.get_arg_offset(arg_index).abs() as u64;
+        //println!("Arg offset of Arg #{}: -{}B", arg_index, arg_offset);
+        let mut stack_addr = adapter.core.reg(16).unwrap().get::<u64>();
+        stack_addr -= arg_offset;
+        let string_res = adapter.core.mem_get_string(stack_addr);
+        //println!("{:?}", string_res);
+        string_res.unwrap()
+    }
+}
+
+impl FromArg for i64 {
+    fn get(adapter: &mut Adapter, arg_index: usize) -> i64 {
+        let arg_offset = adapter.function.get_arg_offset(arg_index) as i16;
+        let addr = adapter.core.reg(16).unwrap().get::<u64>();
+        adapter.core.mem_get((addr, arg_offset)).unwrap()
+    }
+}
+
+impl FromArg for f32 {
+    fn get(adapter: &mut Adapter, arg_index: usize) -> f32 {
+        let arg_offset = adapter.function.get_arg_offset(arg_index) as i16;
+        let addr = adapter.core.reg(16).unwrap().get::<u64>();
+        adapter.core.mem_get((addr, arg_offset)).unwrap()
     }
 }

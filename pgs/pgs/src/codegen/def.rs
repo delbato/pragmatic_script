@@ -74,7 +74,7 @@ impl From<&FunctionDeclArgs> for FunctionDef {
 }
 
 /// A container definition
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ContainerDef {
     pub name: String,
     pub member_variables: HashMap<String, Type>,

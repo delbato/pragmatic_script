@@ -6,28 +6,27 @@ fn: main(n: int) ~ int {
     var t1: int = 0;
     var t2: int = 1;
     var nextT: int = 0;
-    var tmp: int = 0;
 
-    tmp = print("Value of n: ");
-    tmp = printi(n);
-    tmp = println(" ");
-    tmp = print("Fibonacci series: ");
-    tmp = printi(t1);
-    tmp = print(" ");
-    tmp = printi(t2);
-    tmp = println(" ");
+    print("Value of n: ");
+    printi(n);
+    println(" ");
+    print("Fibonacci series: ");
+    printi(t1);
+    print(" ");
+    printi(t2);
+    println(" ");
 
     nextT = t1 + t2;
 
-    while nextT <= n {
-        tmp = printi(nextT);
-        tmp = print(", ");
+    while nextT <= t2 {
+        printi(nextT);
+        print(", ");
         t1 = t2;
         t2 = nextT;
         nextT = t1 + t2;
     }
 
-    tmp = println(" ");
+    println(" ");
 
     return 0;
 }

@@ -1,61 +1,57 @@
 use crate::{
+    api::{
+        module::{
+            Module
+        },
+        adapter::{
+            Adapter
+        }
+    },
     parser::{
         ast::{
             Type
-        }
-    },
-    vm::{
-        core::{
-            Core
         }
     }
 };
 
 use std::{
-    marker::{
-        Sized
+    collections::{
+        HashMap
+    },
+    ops::{
+        FnMut,
+        DerefMut
+    },
+    cmp::{
+        PartialEq
+    },
+    fmt::{
+        Formatter,
+        Result as FmtResult,
+        Debug
+    },
+    clone::{
+        Clone
+    },
+    sync::{
+        Arc,
+        Mutex
     }
 };
 
-pub type FunctionResult<T> = Result<T, FunctionError>;
-
 #[derive(Clone)]
-pub enum FunctionError {
-    Unknown,
-}
-
 pub struct Function {
     pub name: String,
-    pub uid: Option<u64>,
-    pub arguments: Vec<Type>,
-    pub return_type: Option<Type>,
-    pub raw_callback: Option<Box<dyn FnMut(&mut Core) -> FunctionResult<()>>>
+    pub arg_types: Vec<Type>,
+    arg_offsets: HashMap<usize, i64>,
+    arg_sizes: HashMap<usize, usize>,
+    pub return_type: Type,
+    closure: Option<Arc<Mutex<FunctionClosureType>>>
 }
 
-impl Function {
-    pub fn new(name: String) -> Function {
-        Function {
-            name: name, 
-            uid: None,
-            arguments: Vec::new(),
-            return_type: None,
-            raw_callback: None
-        }
-    }
-
-    pub fn with_argument(mut self, arg_type: Type) -> Function {
-        self.arguments.push(arg_type);
-        self
-    }
-
-    pub fn with_return_type(mut self, ret_type: Type) -> Function {
-        self.return_type = Some(ret_type);
-        self
-    }
-
-    pub fn with_callback(mut self, raw_callback: Box<dyn FnMut(&mut Core) -> FunctionResult<()>>) -> Function {
-        self.raw_callback = Some(raw_callback);
-        self
+impl Debug for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "Function ({:?},{:?},{:?},{:?})", self.name, self.arg_types, self.arg_offsets, self.return_type)
     }
 }
 
@@ -64,16 +60,72 @@ impl PartialEq for Function {
         self.name == rhs.name
     }
 }
-
-impl std::fmt::Debug for Function {
-    fn fmt(&self, form: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(form, "Function: {{ name = {}, args = \n", self.name)?;
-        
-        for i in 0..self.arguments.len() {
-            let arg_type = &self.arguments[i];
-            write!(form, "\targ#{}: {:?}\n", i, arg_type)?;
+/*
+impl Clone for Function {
+    fn clone(&self) -> Function {
+        Function {
+            name: self.name.clone(),
+            arg_types: self.arg_types.clone(),
+            arg_offsets: self.arg_offsets.clone(),
+            arg_sizes: self.arg_sizes.clone(),
+            return_type: self.return_type.clone(),
+            closure: None
         }
+    }
+}*/
 
-        write!(form, "\n")
+pub type FunctionClosureType = dyn FnMut(&mut Adapter) -> ();
+
+impl Function {
+    pub fn new<T>(name: T) -> Function
+    where String: From<T> {
+        let name = String::from(name);
+        Function {
+            name: name,
+            arg_types: Vec::new(),
+            arg_offsets: HashMap::new(),
+            arg_sizes: HashMap::new(),
+            return_type: Type::Void,
+            closure: None
+        }
+    }
+
+    pub fn with_ret_type(mut self, ret_type: Type) -> Function {
+        self.return_type = ret_type;
+        self
+    }
+
+    pub fn with_arg(mut self, arg_type: Type) -> Function {
+        self.arg_types.push(arg_type);
+        self
+    }
+
+    pub fn set_arg_offsets(&mut self, arg_offsets: Vec<i64>) {
+        for i in 0..arg_offsets.len() {
+            self.arg_offsets.insert(i, arg_offsets[i]);
+        }
+    }
+
+    pub fn set_arg_sizes(&mut self, arg_sizes: Vec<usize>) {
+        for i in 0..arg_sizes.len() {
+            self.arg_sizes.insert(i, arg_sizes[i]);
+        }
+    }
+
+    pub fn get_arg_offset(&self, arg_index: usize) -> i64 {
+        *self.arg_offsets.get(&arg_index).unwrap()
+    }
+
+    pub fn run(&self, adapter: &mut Adapter) {
+        let closure_arc = self.closure.as_ref().unwrap();
+        let mut closure_lock = closure_arc.lock().unwrap();
+        let closure = closure_lock.deref_mut();
+        closure(adapter);
+    }
+    
+    pub fn with_closure(mut self, closure: Box<FunctionClosureType>) -> Function {
+        let closure_arc = Arc::new(Mutex::new(closure));
+        self.closure = Some(closure_arc);
+        self
     }
 }

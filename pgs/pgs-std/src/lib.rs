@@ -7,9 +7,9 @@ use pgs::{
     },
     api::{
         function::{
-            Function,
-            FunctionError
+            Function
         },
+        adapter::Adapter,
         module::{
             Module
         }
@@ -25,58 +25,45 @@ use pgs::{
 };
 
 fn register_std_print(engine: &mut Engine) -> EngineResult<()> {
-/*
-    let fn_print = Function::new(String::from("print"))
-        .with_argument(Type::String)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack_addr(-16)
-                    .map_err(|_| FunctionError::Unknown)?;
-                let string = core.get_mem_string(string_addr)
-                    .map_err(|_| FunctionError::Unknown)?;
-                print!("{}", string);
-                core.push_stack::<i64>(0)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-
-    let fn_println = Function::new(String::from("println"))
-        .with_argument(Type::String)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let string_addr: u64 = core.get_stack_addr(-16)
-                    .map_err(|_| FunctionError::Unknown)?;
-                let string = core.get_mem_string(string_addr)
-                    .map_err(|_| FunctionError::Unknown)?;
-                println!("{}", string);
-                core.push_stack::<i64>(0)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-
-    let fn_printi = Function::new(String::from("printi"))
-        .with_argument(Type::Int)
-        .with_return_type(Type::Int)
-        .with_callback(
-            Box::new(move |core: &mut Core| {
-                let int: i64 = core.get_stack(-8)
-                    .map_err(|_| FunctionError::Unknown)?;
-                print!("{}", int);
-                core.push_stack::<i64>(0)
-                    .map_err(|_| FunctionError::Unknown)
-            })
-        );
-
-    let module = Module::new(String::from("std"))
-        .with_function(fn_print)
-        .with_function(fn_printi)
-        .with_function(fn_println);
-
+    let printi_function = Function::new("printi")
+        .with_arg(Type::Int)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling printi!");
+            let arg: i64 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let print_function = Function::new("print")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling print!");
+            let arg: String = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let printf_function = Function::new("printf")
+        .with_arg(Type::Float)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter| {
+            let arg: f32 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let println_function = Function::new("println")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling println!");
+            let arg: String = adapter.get_arg(0);
+            println!("{}", arg);
+        }));
+    
+    let module = Module::new("std")
+        .with_function(printi_function)
+        .with_function(print_function)
+        .with_function(println_function)
+        .with_function(printf_function);
+    
     engine.register_module(module)
-    */
-    Ok(())
 }
 
 #[no_mangle]

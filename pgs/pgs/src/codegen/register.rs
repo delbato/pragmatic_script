@@ -59,7 +59,8 @@ impl Into<u8> for Register {
 #[derive(PartialEq, Debug)]
 pub struct RegisterAllocator {
     register_queue: VecDeque<Register>,
-    blocked_registers: HashSet<Register>
+    blocked_registers: HashSet<Register>,
+    forced_temp: Option<Register>
 }
 
 impl RegisterAllocator {
@@ -71,7 +72,8 @@ impl RegisterAllocator {
         }
         let mut reg_alloc = RegisterAllocator {
             register_queue: register_queue,
-            blocked_registers: HashSet::new()
+            blocked_registers: HashSet::new(),
+            forced_temp: None
         };
         // Block the R0 register, as it is used for function return values
         reg_alloc.block_register(Register::R0).unwrap();
@@ -80,6 +82,7 @@ impl RegisterAllocator {
 
     /// Gets the next temporary register, and puts it to the end of the queue
     pub fn get_temp_register(&mut self) -> CompilerResult<Register> {
+        self.forced_temp = None;
         let ret = self.register_queue.pop_front()
             .ok_or(CompilerError::RegisterMapping)?;
         self.register_queue.push_back(ret.clone());
@@ -88,6 +91,9 @@ impl RegisterAllocator {
 
     /// Gets the last temporary register
     pub fn get_last_temp_register(&self) -> CompilerResult<Register> {
+        if self.forced_temp.is_some() {
+            return Ok(self.forced_temp.as_ref().cloned().unwrap());
+        }
         self.register_queue.get(self.register_queue.len() - 1)
             .cloned()
             .ok_or(CompilerError::RegisterMapping)
@@ -111,5 +117,10 @@ impl RegisterAllocator {
         }
         self.register_queue.push_back(reg);
         Ok(())
+    }
+
+    /// Forces a certain register to be returned from get_last_temp_register()
+    pub fn force_temp_register(&mut self, reg: Register) {
+        self.forced_temp = Some(reg);
     }
 }

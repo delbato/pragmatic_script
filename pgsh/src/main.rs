@@ -9,11 +9,12 @@ use pgs::{
         Engine,
         EngineResult
     },
+    codegen::{
+        register::Register
+    },
     api::{
         function::{
-            Function,
-            FunctionError,
-            FunctionResult
+            Function
         },
         module::{
             Module
@@ -112,7 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     //println!("Script run. stack size: {}", engine.get_stack_size());
 
-    let exit_code = engine.pop_stack::<i64>()?;
+    let exit_code = engine.get_register_value::<i64>(Register::R0)?;
 
     //println!("Script exited. Stack size: {}, Exit code: 0x{:X}/{}", engine.get_stack_size(), exit_code, exit_code);
 

@@ -1,4 +1,5 @@
-use crate::{
+extern crate pgs;
+use pgs::{
     vm::{
         core::*,
         is::Opcode

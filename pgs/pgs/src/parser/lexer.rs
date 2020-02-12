@@ -127,6 +127,12 @@ pub enum Token {
     #[token = "::"]
     DoubleColon,
 
+    #[token = "||"]
+    Or,
+
+    #[token = "&&"]
+    DoubleAnd,
+
     #[token = "="]
     Assign,
 

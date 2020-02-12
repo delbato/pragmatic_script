@@ -9,4 +9,10 @@ members = [
 ]
 
 [profile.release]
+opt-level = 3
+debug = false
+incremental = true
 lto = true
+
+[profile.test]
+debug = true

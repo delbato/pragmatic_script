@@ -1,4 +1,6 @@
-use crate::{
+extern crate pgs;
+extern crate pglex;
+use pgs::{
     parser::{
         lexer::Token
     }
@@ -26,6 +28,24 @@ fn test_lex_string_literal() {
 
     assert_eq!(lexer.token, Token::StringLiteral);
     assert_eq!(lexer.slice(), "\"This is a string literal.\"");
+}
+
+#[test]
+fn test_lex_while() {
+    let mut lexer = Token::lexer("while nextT <= t2 { }");
+
+    assert_eq!(lexer.token, Token::While);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::LessThanEquals);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::Text);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::OpenBlock);
+    lexer.advance();
+    assert_eq!(lexer.token, Token::CloseBlock);
+    lexer.advance();
 }
 
 #[test]

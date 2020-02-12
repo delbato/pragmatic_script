@@ -5,13 +5,14 @@ use std::{
     }
 };
 
+#[derive(Debug)]
 pub struct Address {
     pub raw_address: u64,
     pub real_address: u64,
     pub address_type: AddressType
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum AddressType {
     Program,
     Stack,

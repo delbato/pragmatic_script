@@ -131,32 +131,36 @@ fn is_op(token: &Token) -> bool {
         Token::SubAssign => true,
         Token::DivAssign => true,
         Token::DoubleDot => true,
+        Token::Or => true,
+        Token::DoubleAnd => true,
         _ => false
     }
 }
 
 fn op_prec(token: &Token) -> i8 {
     match token {
-        Token::Times => 2,
-        Token::Divide => 2,
-        Token::Plus => 1,
-        Token::Minus => 1,
-        Token::Equals => 0,
-        Token::NotEquals => 0,
-        Token::GreaterThan => 0,
-        Token::GreaterThanEquals => 0,
-        Token::LessThan => 0,
-        Token::LessThanEquals => 0,
-        Token::Not => 3,
-        Token::And => 1,
-        Token::Tilde => 1,
-        Token::Dot => 4,
+        Token::Times => 3,
+        Token::Divide => 3,
+        Token::Plus => 2,
+        Token::Minus => 2,
+        Token::Equals => 1,
+        Token::NotEquals => 1,
+        Token::GreaterThan => 1,
+        Token::GreaterThanEquals => 1,
+        Token::LessThan => 1,
+        Token::LessThanEquals => 1,
+        Token::Not => 4,
+        Token::And => 2,
+        Token::Tilde => 2,
+        Token::Dot => 5,
         Token::Assign => 0,
         Token::AddAssign => 0,
         Token::MulAssign => 0,
         Token::SubAssign => 0,
         Token::DivAssign => 0,
         Token::DoubleDot => 0,
+        Token::Or => 0,
+        Token::DoubleAnd => 0,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -185,6 +189,8 @@ fn is_op_right_assoc(token: &Token) -> bool {
         Token::SubAssign => true,
         Token::DivAssign => true,
         Token::DoubleDot => false,
+        Token::Or => false,
+        Token::DoubleAnd => false,
         _ => {
             panic!("ERROR! Not an operator");
         }
@@ -985,13 +991,17 @@ impl Parser {
             lexer.advance();
         }
 
+        //println!("Trying to parse call stmt to function {}", full_fn_name);
+
         if &last_bit == "::" {
             *lexer = lexer_backup;
+            //println!("ERROR! Trailing \"::\"");
             return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
         }
 
         if lexer.token != Token::OpenParan {
             *lexer = lexer_backup;
+            //println!("ERROR! No \"(\"");
             return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
         }
 
@@ -1007,6 +1017,7 @@ impl Parser {
                 Token::CloseParan
             ]);
             if arg_res.is_err() {
+                //println!("Error when parsing fn arg");
                 *lexer = lexer_backup;
                 return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
             }
@@ -1101,43 +1112,40 @@ impl Parser {
 
         // swallow var name
         lexer.advance();
+        
+        let mut var_type = Type::Auto;
 
-        if var_name.len() == 1 && lexer.token == Token::Text {
-            var_name += lexer.slice();
+        // if type is specified
+        if lexer.token == Token::Colon {
+            // Swallow ":"
+            lexer.advance();
+
+            var_type = match lexer.token {
+                Token::Int => Type::Int,
+                Token::Float => Type::Float,
+                Token::String => Type::String,
+                Token::Bool => Type::Bool,
+                Token::Text => {
+                    let mut type_name = String::from(lexer.slice());
+                    // Workaround for broken Lexer
+                    if type_name.len() == 1 {
+                        let lexer_backup = lexer.clone();
+                        lexer.advance();
+                        if lexer.token == Token::Text {
+                            type_name += lexer.slice();
+                        } else {
+                            *lexer = lexer_backup;
+                        }
+                    }
+                    Type::Other(type_name)
+                },
+                _ => {
+                    return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
+                }
+            };
+            // Swallow type
             lexer.advance();
         }
-
-        // Parse ":"
-        if lexer.token != Token::Colon {
-            return Err(ParseError::new(ParseErrorType::ExpectedColon, lexer.range()));
-        }
-        lexer.advance();
-
-        let var_type = match lexer.token {
-            Token::Int => Type::Int,
-            Token::Float => Type::Float,
-            Token::String => Type::String,
-            Token::Bool => Type::Bool,
-            Token::Text => {
-                let mut type_name = String::from(lexer.slice());
-                // Workaround for broken Lexer
-                if type_name.len() == 1 {
-                    let lexer_backup = lexer.clone();
-                    lexer.advance();
-                    if lexer.token == Token::Text {
-                        type_name += lexer.slice();
-                    } else {
-                        *lexer = lexer_backup;
-                    }
-                }
-                Type::Other(type_name)
-            },
-            _ => {
-                return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
-            }
-        };
-
-        lexer.advance();
 
         if lexer.token != Token::Assign {
             *lexer = lexer_backup;
@@ -1236,6 +1244,7 @@ impl Parser {
         //println!("parse_expr_push(): operand stack len {}", operand_stack.len());
         let op = operator_stack.pop_front().unwrap();
         //println!("parse_expr_push(): operator {:?}", op);
+        //println!("parse_expr_push() start");
         let expr = match op {
             Token::Plus => {
                 let rhs = operand_stack.pop_front().unwrap();
@@ -1329,10 +1338,22 @@ impl Parser {
                 let lhs = operand_stack.pop_front().unwrap();
                 Expression::DivAssign(Box::new(lhs), Box::new(rhs))
             },
+            Token::DoubleAnd => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::And(Box::new(lhs), Box::new(rhs))
+            },
+            Token::Or => {
+                let rhs = operand_stack.pop_front().unwrap();
+                let lhs = operand_stack.pop_front().unwrap();
+                Expression::Or(Box::new(lhs), Box::new(rhs))
+            },
             _ => {
                 return Err(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()));
             }
         };
+
+        //println!("parse_expr_push() end");
         Ok(expr)
     }
 
@@ -1354,9 +1375,15 @@ impl Parser {
         // Swallow "{"
         lexer.advance();
 
-        let instance_map = self.parse_cont_instance_content(lexer)?;
+        let instance_map_res = self.parse_cont_instance_content(lexer);
+        if instance_map_res.is_err() {
+            *lexer = lexer_backup;
+            return make_parse_error!(lexer, ParseErrorType::ExpectedMemberName);
+        }
+        let instance_map = instance_map_res.unwrap();
 
         if lexer.token != Token::CloseBlock {
+            *lexer = lexer_backup;
             return make_parse_error!(lexer, ParseErrorType::ExpectedCloseBlock);
         }
 
@@ -1511,18 +1538,6 @@ impl Parser {
                         expr = cont_inst_expr_res.unwrap();
                     } else {
                         let mut var_name = String::from(lexer.slice());
-                    
-                        if var_name.len() == 1 {
-                            let lexer_backup = lexer.clone();
-                            lexer.advance();
-                        
-                            if lexer.token == Token::Text {
-                                var_name += lexer.slice();
-                            } else {
-                                *lexer = lexer_backup;
-                            }
-                        }
-
                         expr = Expression::Variable(var_name);
                     }
                 }
@@ -1545,6 +1560,7 @@ impl Parser {
 
             if lexer.token == Token::StringLiteral {
                 let string = String::from(lexer.slice());
+                //println!("Parsing string literal {}", string);
                 let expr = Expression::StringLiteral(string);
                 operand_stack.push_front(expr);
             }
@@ -1619,6 +1635,9 @@ impl Parser {
             let expr = self.parse_expr_push(lexer, &mut operand_stack, &mut operator_stack)?;
             operand_stack.push_front(expr);
         }
+
+        //println!("Operator stack: {:?}", operator_stack);
+        //println!("Operand stack: {:?}", operand_stack);
 
         operand_stack.pop_front()
             .ok_or(ParseError::new(ParseErrorType::UnsupportedExpression, lexer.range()))

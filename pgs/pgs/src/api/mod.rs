@@ -1,11 +1,8 @@
+/// Contains the function API
 pub mod function;
 
+/// Contains the module API
 pub mod module;
 
-pub mod container;
-
-pub mod slice;
-
+/// Contains the adapter interface API
 pub mod adapter;
-
-pub mod error;

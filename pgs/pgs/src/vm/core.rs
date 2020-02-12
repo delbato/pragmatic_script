@@ -17,14 +17,16 @@ use crate::{
     },
     api::{
         module::Module,
-        function::*
+        function::*,
+        adapter::Adapter
     }
 };
 
 use std::{
     collections::{
         VecDeque,
-        HashMap
+        HashMap,
+        HashSet
     },
     mem::{
         size_of,
@@ -33,6 +35,7 @@ use std::{
     cell::{
         RefCell
     },
+    convert::TryFrom,
     ops::Range,
     fmt::{
         Debug,
@@ -71,7 +74,7 @@ pub struct Core {
     stack: Vec<u8>,
     heap: Vec<u8>,
     heap_pointers: Vec<Range<usize>>,
-    foreign_functions: HashMap<u64, Box<dyn FnMut(&mut Core) -> FunctionResult<()>>>,
+    foreign_function_uids: HashSet<u64>,
     swap: Vec<u8>,
     program: Option<Program>,
     stack_frames: VecDeque<usize>,
@@ -85,6 +88,8 @@ pub struct Core {
 pub enum CoreError {
     Unknown,
     NoProgram,
+    StackOverflow,
+    InvalidOpcode(u8),
     UnimplementedOpcode(Opcode),
     OperatorDeserialize,
     OperatorSerialize,
@@ -107,6 +112,7 @@ impl Error for CoreError {
 
 impl Core {
     pub fn new(stack_size: usize) -> Core {
+        //println!("Core::new(): Stack size = {}", stack_size);
         let mut stack = Vec::new();
         stack.resize(stack_size, 0);
         let mut swap = Vec::new();
@@ -120,7 +126,7 @@ impl Core {
             stack: stack,
             heap: Vec::new(),
             heap_pointers: Vec::new(),
-            foreign_functions: HashMap::new(),
+            foreign_function_uids: HashSet::new(),
             stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
             registers: [Register::new(); 16],
@@ -131,6 +137,8 @@ impl Core {
 
     #[inline]
     pub fn load_program(&mut self, program: Program) {
+        self.foreign_function_uids.clear();
+        self.foreign_function_uids = program.foreign_functions.iter().map(|(k, _)| *k).collect();
         self.program = Some(program);
     }
 
@@ -154,12 +162,10 @@ impl Core {
     pub fn get_opcode(&mut self) -> CoreResult<Opcode> {
         let program = self.program.as_ref()
             .ok_or(CoreError::NoProgram)?;
-        //println!("Getting opcode {:X} ...", program.code[self.ip]);
-        //println!("Opcode: {:?}", Opcode::from(program.code[self.ip])),
-        let ip: usize = self.ip.get();
-        let opcode = Opcode::from(program.code[ip]);
-        self.ip.inc(1usize);
-        
+        //println!("ip: {}", self.ip.get::<usize>());
+        let op: u8 = self.get_op()?;
+        let opcode = Opcode::try_from(op)?;
+        //println!("opcode: {:?}", opcode);
         Ok(
             opcode
         )
@@ -551,7 +557,16 @@ impl Core {
                     let lhs: u64 = {
                         self.reg(lhs_reg)?.get()
                     };
+                    //println!("ADDUI: {} + {}", lhs, rhs);
+                    if lhs_reg == 16 && target_reg == 16 {
+                        let lhs = Address::from(self.sp.get::<u64>()).real_address;
+                        //println!("Incrementing SP(={}) by {}", lhs, rhs);
+                        if lhs + rhs > self.stack.len() as u64 {
+                            return Err(CoreError::StackOverflow);
+                        }
+                    }
                     self.reg(target_reg)?.set(lhs + rhs);
+                    //println!("SP After ADDU_I: {}", Address::from(self.sp.get::<u64>()).real_address);
                 },
                 Opcode::SUBU_I => {
                     let lhs_reg: u8 = self.get_op()?;
@@ -560,6 +575,10 @@ impl Core {
                     let lhs: u64 = {
                         self.reg(lhs_reg)?.get()
                     };
+                    if lhs_reg == 16 && target_reg == 16 {
+                        let lhs = Address::from(self.sp.get::<u64>()).real_address;
+                        //println!("Decrementing SP(={}) by {}", lhs, rhs);
+                    }
                     self.reg(target_reg)?.set(lhs - rhs);
                 },
                 Opcode::MULU_I => {
@@ -738,6 +757,30 @@ impl Core {
                         self.reg(lhs_reg)?.get()
                     };
                     self.reg(rhs_reg)?.set(!lhs);
+                },
+                Opcode::AND => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    let rhs: bool = {
+                        self.reg(rhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs && rhs);
+                },
+                Opcode::OR => {
+                    let lhs_reg: u8 = self.get_op()?;
+                    let rhs_reg: u8 = self.get_op()?;
+                    let target_reg: u8 = self.get_op()?;
+                    let lhs: bool = {
+                        self.reg(lhs_reg)?.get()
+                    };
+                    let rhs: bool = {
+                        self.reg(rhs_reg)?.get()
+                    };
+                    self.reg(target_reg)?.set(lhs || rhs);
                 },
                 Opcode::EQI => {
                     let lhs_reg: u8 = self.get_op()?;
@@ -953,6 +996,8 @@ impl Core {
         data.resize(n, 0);
 
         let lhs_addr = Address::from(addr.0).with_offset(addr.1);
+        //println!("Getting n = {} bytes at address {:?}", n, lhs_addr);
+        //println!("SP: {}", Address::from(self.sp.get::<u64>()).real_address);
 
         let source_addr = lhs_addr.real_address as usize;
 
@@ -980,8 +1025,11 @@ impl Core {
     
     #[inline]
     pub fn mem_get_string(&self, addr: u64) -> CoreResult<String> {
+        //println!("mem_get_string(): string addr: {:?}", Address::from(addr));
         let string_size: u64 = self.mem_get((addr, 0))?;
+        //println!("String size: {}", string_size);
         let string_addr: u64 = self.mem_get((addr + 8, 0))?;
+        //println!("String addr: {}", string_addr);
         let string_data = self.mem_get_n((string_addr, 0), string_size as usize)?;
         String::from_utf8(string_data)
             .map_err(|_| CoreError::OperatorDeserialize)
@@ -1046,12 +1094,8 @@ impl Core {
     #[inline]
     fn call(&mut self) -> CoreResult<()> {
         let fn_uid: u64 = self.get_op()?;
-        if let Some(mut closure) = self.foreign_functions.remove(&fn_uid) {
-            //println!("Executing foreign function...");
-            closure(self)
-                .map_err(|_| CoreError::Unknown)?;
-            self.foreign_functions.insert(fn_uid, closure);
-            return Ok(());
+        if self.foreign_function_uids.contains(&fn_uid) {
+            return self.call_foreign_fn(fn_uid);
         }
 
         let program = self.program.as_ref()
@@ -1067,6 +1111,30 @@ impl Core {
         Ok(())
     }
 
+    fn call_foreign_fn(&mut self, uid: u64) -> CoreResult<()> {
+        let function = {
+            self.program.as_mut()
+                .ok_or(CoreError::NoProgram)?
+                .foreign_functions
+                .remove(&uid)
+                .ok_or(CoreError::UnknownFunctionUid)?
+        };
+
+        //println!("Calling foreign function {}", function.name);
+
+        {
+            let mut adapter = Adapter::new(&function, self);
+            function.run(&mut adapter);
+        }
+
+        self.program.as_mut()
+            .ok_or(CoreError::NoProgram)?
+            .foreign_functions
+            .insert(uid, function);
+
+        Ok(())
+    }
+
     #[inline]
     fn ret(&mut self) -> CoreResult<()> {
         let old_ip = self.call_stack.pop_front()
@@ -1076,18 +1144,26 @@ impl Core {
     }
 
     #[inline]
-    fn get_op<T: DeserializeOwned>(&mut self) -> CoreResult<T> {
+    fn get_op<T: DeserializeOwned + Debug>(&mut self) -> CoreResult<T> {
         let op_size = size_of::<T>();
 
-        let program = &self.program.as_ref().unwrap().code;
+        let program = self.program.as_ref()
+            .ok_or(CoreError::NoProgram)?;
+
 
         let tmp_ip = self.ip.get::<usize>();
 
-        let raw_bytes: &[u8] = &program[tmp_ip..tmp_ip + op_size];
+        //println!("Getting op with size {}...", op_size);
+        //println!("Op ends at {}!", tmp_ip + op_size);
+        //println!("Program size: {}", program.code.len());
+
+        let raw_bytes: &[u8] = &program.code[tmp_ip..tmp_ip + op_size];
         //println!("get_op raw bytes: {:?}", raw_bytes);
 
         let ret: T = deserialize(raw_bytes)
             .map_err(|_| CoreError::OperatorDeserialize)?;
+
+        //println!("Op: {:?}", ret);
 
         self.ip.inc(op_size);
 
@@ -1101,16 +1177,13 @@ impl Core {
         let raw_bytes = serialize(&item)
             .map_err(|_| CoreError::OperatorSerialize)?;
 
-        let tmp_sp = self.sp.get::<usize>();
+        let sp_addr = Address::from(self.sp.get::<u64>());
+        let sp_real = sp_addr.real_address as usize;
 
-        if self.stack.len() - (tmp_sp + op_size) <= STACK_GROW_THRESHOLD {
-            self.stack.resize(self.stack.len() + STACK_GROW_INCREMENT, 0);
-        } 
-        
         for i in 0..op_size {
-            self.stack[tmp_sp + i] = raw_bytes[i];
+            self.stack[sp_real + i] = raw_bytes[i];
         }
-        
+
         self.sp.inc(op_size);
 
         Ok(())
@@ -1158,20 +1231,6 @@ impl Core {
             self.swap[i] = raw_bytes[i];
         }
 
-        Ok(())
-    }
-
-    pub fn register_foreign_module(&mut self, module: Module) -> CoreResult<()> {
-        for function in module.functions {
-            let raw_callback = function.raw_callback
-                .ok_or(CoreError::Unknown)?;
-            let uid = function.uid
-                .ok_or(CoreError::UnknownFunctionUid)?;
-            self.foreign_functions.insert(uid, raw_callback);
-        }
-        for (_, module) in module.modules {
-            self.register_foreign_module(module)?;
-        }
         Ok(())
     }
 }

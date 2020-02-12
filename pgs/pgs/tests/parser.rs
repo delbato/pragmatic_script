@@ -1,4 +1,6 @@
-use crate::{
+extern crate pgs;
+extern crate pglex;
+use pgs::{
     parser::{
         parser::*,
         ast::*,
@@ -288,7 +290,7 @@ fn test_parse_full_fn() {
 
 #[test]
 fn test_parse_expr_paran_delim() {
-    use crate::{
+    use pgs::{
         parser::ast::*  
     };
 
@@ -338,7 +340,7 @@ fn test_parse_expr_paran_delim() {
 
 #[test]
 fn test_parse_call_stmt() {
-    use crate::{
+    use pgs::{
         parser::ast::*  
     };
 
@@ -361,7 +363,7 @@ fn test_parse_call_stmt() {
 
 #[test]
 fn test_parse_call_expr() {
-    use crate::parser::ast::Expression;
+    use pgs::parser::ast::Expression;
 
     let code = String::from("
         add(5, 5);
@@ -386,7 +388,7 @@ fn test_parse_call_expr() {
 
 #[test]
 fn test_parse_complex_call_expr() {
-    use crate::parser::ast::Expression;
+    use pgs::parser::ast::Expression;
 
     let code = String::from("
         add(5, 5) + 5;

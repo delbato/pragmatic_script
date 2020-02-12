@@ -22,6 +22,8 @@ pub enum Expression {
     Multiplication(Box<Expression>, Box<Expression>),
     Division(Box<Expression>, Box<Expression>),
     Not(Box<Expression>),
+    And(Box<Expression>, Box<Expression>),
+    Or(Box<Expression>, Box<Expression>),
     Equals(Box<Expression>, Box<Expression>),
     NotEquals(Box<Expression>, Box<Expression>),
     GreaterThan(Box<Expression>, Box<Expression>),

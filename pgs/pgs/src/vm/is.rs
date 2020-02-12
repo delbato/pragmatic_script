@@ -1,15 +1,23 @@
+use crate::{
+    vm::{
+        core::{
+            CoreResult,
+            CoreError
+        }
+    }
+};
+
 use std::{
     convert::{
-        From,
+        TryFrom,
         Into
     },
     fmt::{
         UpperHex
-    }
+    },
 };
 
 use epd::*;
-
 use num_traits::FromPrimitive;
 
 #[derive(PartialEq, Debug, Clone, Primitive)]
@@ -71,23 +79,28 @@ pub enum Opcode {
     CALL = 54,
     RET = 55,
     NOT = 56,
-    EQI = 57,
-    NEQI = 58,
-    LTI = 59,
-    GTI = 60,
-    LTEQI = 61,
-    GTEQI = 62,
-    EQF = 63,
-    NEQF = 64,
-    LTF = 65,
-    GTF = 66,
-    LTEQF = 67,
-    GTEQF = 68
+    AND = 57,
+    OR = 58,
+    EQI = 59,
+    NEQI = 60,
+    LTI = 61,
+    GTI = 62,
+    LTEQI = 63,
+    GTEQI = 64,
+    EQF = 65,
+    NEQF = 66,
+    LTF = 67,
+    GTF = 68,
+    LTEQF = 69,
+    GTEQF = 70
 }
 
-impl From<u8> for Opcode {
-    fn from(val: u8) -> Opcode {
-        Opcode::from_u8(val).unwrap()
+impl TryFrom<u8> for Opcode {
+    type Error = CoreError;
+
+    fn try_from(val: u8) -> CoreResult<Opcode> {
+        Opcode::from_u8(val)
+            .ok_or(CoreError::InvalidOpcode(val))
     }
 }
 

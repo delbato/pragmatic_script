@@ -1,41 +1,41 @@
-use crate::{
-    api::{
-        function::{
-            Function,
-            FunctionError,
-            FunctionResult
-        }
-    }
-};
-
 use std::{
     collections::{
         HashMap
-    }  
+    }
+};
+
+use crate::{
+    api::{
+        function::{
+            Function
+        }
+    }
 };
 
 pub struct Module {
     pub name: String,
-    pub modules: HashMap<String, Module>,
-    pub functions: Vec<Function>
+    pub functions: HashMap<String, Function>,
+    pub modules: HashMap<String, Module>
 }
 
 impl Module {
-    pub fn new(name: String) ->  Module {
+    pub fn new<T>(name: T) -> Module
+    where String: From<T> {
+        let name = String::from(name);
         Module {
             name: name,
-            modules: HashMap::new(),
-            functions: Vec::new()
+            functions: HashMap::new(),
+            modules: HashMap::new()
         }
+    }
+
+    pub fn with_function(mut self, function: Function) -> Module {
+        self.functions.insert(function.name.clone(), function);
+        self
     }
 
     pub fn with_module(mut self, module: Module) -> Module {
         self.modules.insert(module.name.clone(), module);
-        self
-    }
-
-    pub fn with_function(mut self, function: Function) -> Module {
-        self.functions.push(function);
         self
     }
 }

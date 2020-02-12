@@ -1,5 +1,10 @@
 use std::{
-    marker::Copy
+    marker::Copy,
+    fmt::{
+        Result as FmtResult,
+        Formatter,
+        Debug
+    }
 };
 
 #[derive(Clone)]
@@ -9,6 +14,13 @@ pub union Register {
     pub float: f32,
     pub boolean: bool
 }
+
+impl Debug for Register {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", unsafe { self.uint64 })
+    }
+}
+
 
 impl Register {
     pub fn new() -> Register {

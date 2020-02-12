@@ -1,4 +1,8 @@
 use crate::{
+    api::{
+        module::Module,
+        function::Function
+    },
     codegen::{
         context::{
             ModuleContext,
@@ -52,7 +56,8 @@ use std::{
     error::Error,
     collections::{
         VecDeque,
-        HashMap
+        HashMap,
+        HashSet
     },
     ops::{
         Deref
@@ -96,6 +101,8 @@ pub struct Compiler {
     mod_context_stack: VecDeque<ModuleContext>,
     loop_ctx_stack: VecDeque<LoopContext>,
     fn_uid_map: HashMap<String, u64>,
+    foreign_functions: Option<HashMap<u64, Function>>,
+    foreign_function_uids: HashSet<u64>,
     uid_generator: UIDGenerator,
     builder: Builder,
     current_cont: Option<String>,
@@ -113,6 +120,8 @@ impl Compiler {
             mod_context_stack: mod_context_stack,
             loop_ctx_stack: VecDeque::new(),
             fn_uid_map: HashMap::new(),
+            foreign_functions: Some(HashMap::new()),
+            foreign_function_uids: HashSet::new(),
             uid_generator: UIDGenerator::new(),
             builder: Builder::new(),
             current_cont: None,
@@ -126,7 +135,7 @@ impl Compiler {
     }
 
     /// Retrieves the program instance compiled by this compiler instance.
-    pub fn get_program(&self) -> CompilerResult<Program> {
+    pub fn get_program(&mut self) -> CompilerResult<Program> {
         let mut builder = self.builder.clone();
         let data = self.data.clone();
         let data_len = data.bytes.len();
@@ -149,18 +158,27 @@ impl Compiler {
 
         // correctly set function offsets
         for (fn_name, fn_uid) in self.fn_uid_map.iter() {
+            if self.is_function_foreign(*fn_uid)? {
+                continue;
+            }
             let fn_offset = builder.get_label_offset(fn_name)
                 .ok_or(CompilerError::Unknown)?;
             functions.insert(fn_uid.clone(), fn_offset + data_len);
         }
 
+        let foreign_functions = self.foreign_functions.take()
+            .ok_or(CompilerError::Unknown)?;
+
+
         let mut code = data.bytes;
         let mut builder_code = builder.build();
+        //println!("Data length: {}", code.len());
         code.append(&mut builder_code);
 
         let program = Program::new()
             .with_code(code)
-            .with_functions(functions);
+            .with_functions(functions)
+            .with_foreign_functions(foreign_functions);
         
         Ok(program)
     }
@@ -183,6 +201,18 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Gets the root module context (mutable)
+    pub fn get_root_module_mut(&mut self) -> CompilerResult<&mut ModuleContext> {
+        self.mod_context_stack.get_mut(self.mod_context_stack.len() - 1)
+            .ok_or(CompilerError::Unknown)
+    }
+
+    /// Gets the root module context
+    pub fn get_root_module(&self) -> CompilerResult<&ModuleContext> {
+        self.mod_context_stack.get(self.mod_context_stack.len() - 1)
+            .ok_or(CompilerError::Unknown)
+    } 
+
     /// Gets the current module context (the one at the top of the stack) as a mutable reference
     pub fn get_current_module_mut(&mut self) -> CompilerResult<&mut ModuleContext> {
         self.mod_context_stack.get_mut(0)
@@ -201,10 +231,33 @@ impl Compiler {
             .ok_or(CompilerError::Unknown)
     }
 
+    /// Gets the next temporary register from the current context
+    pub fn get_next_register(&mut self) -> CompilerResult<Register> {
+        let fn_ctx = self.get_current_function_mut()?;
+        fn_ctx.register_allocator.get_temp_register()
+    }
+
+    /// Gets the last temporary register from the current context
+    pub fn get_last_register(&self) -> CompilerResult<Register> {
+        let fn_ctx = self.get_current_function()?;
+        fn_ctx.register_allocator.get_last_temp_register()
+    }
+
+    /// Gets the current loop context
+    pub fn get_current_loop(&self) -> CompilerResult<&LoopContext> {
+        self.loop_ctx_stack.get(0)
+            .ok_or(CompilerError::Unknown)
+    }
+
     /// Gets the function context at stack index
     pub fn get_function(&self, index: usize) -> CompilerResult<&FunctionContext> {
         self.fn_context_stack.get(index)
             .ok_or(CompilerError::Unknown)
+    }
+
+    /// Returns true if the given function uid is foreign
+    pub fn is_function_foreign(&self, uid: u64) -> CompilerResult<bool> {
+        Ok(self.foreign_function_uids.contains(&uid))
     }
 
     /// Gets the first parent non-weak function context
@@ -255,7 +308,49 @@ impl Compiler {
 
     /// Resolves a function by name to a FunctionDef
     pub fn resolve_function(&self, name: &String) -> CompilerResult<FunctionDef> {
-        Err(CompilerError::Unimplemented(format!("Function resolving not implemented yet!")))
+        if name.contains("::") {
+            let path_fragments: Vec<String> = name.split("::").map(|s| String::from(s)).collect();
+            let mut mod_ctx_opt = None;
+            let mut start_i = 0;
+            if path_fragments[0] == "root" {
+                start_i = 1;
+                mod_ctx_opt = Some(self.get_root_module()?);
+            } else if path_fragments[0] == "super" {
+                start_i = 1;
+                return Err(CompilerError::Unimplemented(format!("Blub")));
+            } else {
+                mod_ctx_opt = Some(self.get_current_module()?);
+            }
+
+            for i in start_i..path_fragments.len() - 1 {
+                let mod_ctx = mod_ctx_opt.unwrap();
+                //println!("Blub");
+                mod_ctx_opt = mod_ctx.modules.get(&path_fragments[i]);
+            }
+
+            let last_path = path_fragments.last().unwrap();
+
+            //println!("Resolving function {} for mod_ctx {}", last_path, mod_ctx_opt.as_ref().unwrap().name);
+
+            let mod_ctx = mod_ctx_opt.unwrap();
+            return mod_ctx.functions.get(last_path)
+                .cloned()
+                .ok_or(CompilerError::UnknownFunction(name.clone()));
+        } else {
+            let mod_ctx = self.get_current_module()?;
+            if mod_ctx.functions.contains_key(name) {
+                return mod_ctx.functions.get(name)
+                    .cloned()
+                    .ok_or(CompilerError::Unknown);
+            }
+            if mod_ctx.imports.contains_key(name) {
+                let import_path = mod_ctx.imports.get(name)
+                    .ok_or(CompilerError::Unknown)?;
+                return self.resolve_function(import_path);
+            }
+
+            return Err(CompilerError::UnknownFunction(name.clone()));
+        }
     }
 
     /// Resolves a container by name to a ContainerDef
@@ -341,6 +436,86 @@ impl Compiler {
     pub fn get_stack_size(&self) -> CompilerResult<usize> {
         let fn_ctx = self.get_current_function()?;
         Ok(fn_ctx.stack_size)
+    }
+
+    // #endregion
+
+    // #region FFI
+
+    /// Registers a foreign module in the root
+    pub fn register_foreign_root_module(&mut self, module: Module) -> CompilerResult<()> {
+        self.register_foreign_module(module, &String::from("root::"))?;
+        Ok(())
+    }
+
+    /// Registers a foreign module
+    fn register_foreign_module(&mut self, module: Module, path: &String) -> CompilerResult<()> {
+        let path = format!("{}{}::", path, module.name.clone());
+        let mut mod_ctx = ModuleContext::new(module.name.clone());
+
+        self.push_module_context(mod_ctx);
+
+        for (_, function) in module.functions {
+            self.register_foreign_function(function, &path)?;
+        }
+
+        for (_, module) in module.modules {
+            self.register_foreign_module(module, &path)?;
+        }
+
+        mod_ctx = self.pop_module_context()?;
+
+        let front_mod_ctx = self.get_current_module_mut()?;
+        front_mod_ctx.add_module(mod_ctx)?;
+
+        Ok(())
+    }
+
+    fn register_foreign_function(&mut self, mut function: Function, path: &String) -> CompilerResult<()> {
+        if self.foreign_functions.is_none() {
+            self.foreign_functions = Some(HashMap::new());
+        }
+
+        let full_fn_name = path.clone() + &function.name;
+        let fn_uid = self.uid_generator.get_function_uid(&full_fn_name);
+        let function_clone = function.clone();
+
+        let mut arg_offset_sum: i64 = 0;
+        let mut arg_sizes = Vec::new();
+        let mut arg_offsets = Vec::new();
+        arg_sizes.resize(function.arg_types.len(), 0);
+        arg_offsets.resize(function.arg_types.len(), 0);
+        let mut i = arg_sizes.len() - 1;
+        for arg_type in function_clone.arg_types.iter().rev() {
+            let arg_size = self.get_size_of_type(&arg_type)?;
+            arg_sizes[i] = arg_size;
+            arg_offset_sum -= arg_size as i64;
+            arg_offsets[i] = arg_offset_sum;
+            //println!("Registering arg i={}", i);
+            if i > 0 {
+                i -= 1;
+            }
+        }
+
+        function.set_arg_offsets(arg_offsets);
+        function.set_arg_sizes(arg_sizes);
+
+        self.fn_uid_map.insert(full_fn_name, fn_uid);
+        self.foreign_function_uids.insert(fn_uid);
+        self.foreign_functions.as_mut()
+            .ok_or(CompilerError::Unknown)?
+            .insert(fn_uid, function);
+
+        let fn_args: Vec<(String, Type)> = function_clone.arg_types.iter().map(|t| (String::from(""), t.clone())).collect();
+        let fn_def = FunctionDef::new(function_clone.name)
+            .with_arguments(&fn_args)
+            .with_ret_type(function_clone.return_type)
+            .with_uid(fn_uid);
+
+        let front_mod_ctx = self.get_current_module_mut()?;
+        front_mod_ctx.add_function(fn_def)?;
+
+        Ok(())
     }
 
     // #endregion
@@ -547,8 +722,31 @@ impl Compiler {
         Ok(())
     }
 
+    /// Compiles the proper SUBU_I instruction for a break statement
+    pub fn compile_stack_loop(&mut self) -> CompilerResult<()> {
+        let mut pop_size = 0;
+
+        // Pop all values until the first loop context is hit
+        for i in 0..self.fn_context_stack.len() {
+            let fn_ctx = self.fn_context_stack.get(i)
+                .ok_or(CompilerError::Unknown)?;
+            pop_size += fn_ctx.stack_size;
+            if fn_ctx.is_loop {
+                break;
+            }
+        }
+
+        //println!("Compiling loop stack cleanup with pop size {}", pop_size);
+
+        let stack_instr = Instruction::new_dec_stack(pop_size);
+        self.builder.push_instr(stack_instr);
+
+        Ok(())
+    }
+    
+
     /// Compiles a stack cleanup for a given function context
-    pub fn compile_stack_cleanup(&mut self, fn_ctx: &FunctionContext) -> CompilerResult<()> {
+    pub fn compile_stack_cleanup_block(&mut self, fn_ctx: &FunctionContext) -> CompilerResult<()> {
         let pop_size = fn_ctx.stack_size;
 
         //println!("Compiling stack cleanup with stack size {}", pop_size);
@@ -564,7 +762,7 @@ impl Compiler {
     }
 
     /// Compiles a full stack unwind until the parent function is hit 
-    pub fn compile_stack_cleanup_and_return(&mut self) -> CompilerResult<()> {
+    pub fn compile_stack_cleanup_return(&mut self) -> CompilerResult<()> {
         let mut parent_fn_ctx_opt = None;
         let mut stack_size = 0;
 
@@ -675,6 +873,8 @@ impl Compiler {
             Statement::Return(_) => self.compile_return_stmt(stmt)?,
             Statement::If(_) => self.compile_if_stmt(stmt)?,
             Statement::While(_, _) => self.compile_while_stmt(stmt)?, 
+            Statement::Continue => self.compile_continue_stmt(stmt)?,
+            Statement::Break => self.compile_break_stmt(stmt)?,
             _ => return Err(CompilerError::Unimplemented(format!("Compilation of {:?} not implemented!", stmt)))
         };
         Ok(())
@@ -689,11 +889,16 @@ impl Compiler {
         // The variable name
         let var_name = var_decl_args.name.clone();
         // The variable type
-        let var_type = var_decl_args.var_type.clone();
-        // Byte size of this type
-        let var_size = self.get_size_of_type(&var_type)?;
+        let mut var_type = var_decl_args.var_type.clone();
         // The assignment expression
         let assignment_expr = &var_decl_args.assignment;
+        let assignment_expr_type = self.check_expr_type(&assignment_expr)?;
+        // Special handling for auto typed vars
+        if var_type == Type::Auto {
+            var_type = assignment_expr_type;
+        }
+        // Byte size of this type
+        let var_size = self.get_size_of_type(&var_type)?;
         // Compile said expression
         self.compile_expr(assignment_expr)?;
 
@@ -752,6 +957,7 @@ impl Compiler {
         };
 
         match stmt_expr {
+            Expression::Call(_, _) => self.compile_expr(stmt_expr)?,
             Expression::Assign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
             Expression::AddAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
             Expression::SubAssign(_, _) => self.compile_var_assign_stmt_expr(stmt_expr)?,
@@ -763,6 +969,7 @@ impl Compiler {
         Ok(())
         //Err(CompilerError::Unimplemented(format!("Statement expr compilation not implemented!")))
     }
+    
 
     /// Compiles an if statement
     pub fn compile_if_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
@@ -811,7 +1018,7 @@ impl Compiler {
         // Pop the function context off the stack again
         if_fn_ctx = self.pop_function_context()?;
 
-        self.compile_stack_cleanup(&if_fn_ctx)?;
+        self.compile_stack_cleanup_block(&if_fn_ctx)?;
 
         // Instruction for jumping to the end
         let jmp_end_instr = Instruction::new(Opcode::JMP)
@@ -879,7 +1086,7 @@ impl Compiler {
                 // Pop the context off the stack again
                 else_if_fn_ctx = self.pop_function_context()?;
 
-                self.compile_stack_cleanup(&else_if_fn_ctx)?;
+                self.compile_stack_cleanup_block(&else_if_fn_ctx)?;
 
                 // Instruction for jumping to the end
                 let jmp_end_instr = Instruction::new(Opcode::JMP)
@@ -926,7 +1133,7 @@ impl Compiler {
             // Pop it off the stack again
             else_fn_ctx = self.pop_function_context()?;
 
-            self.compile_stack_cleanup(&else_fn_ctx)?;
+            self.compile_stack_cleanup_block(&else_fn_ctx)?;
         } else {
             // Set the last JMPF to jump to this instruction
             let pos = self.builder.get_current_offset();
@@ -966,18 +1173,113 @@ impl Compiler {
     }
 
     /// Compiles a while statement
-    pub fn compile_while_stmt(&mut self, _stmt: &Statement) -> CompilerResult<()> {
-        Err(CompilerError::Unimplemented(format!("While statement compilation not implemented!")))
+    pub fn compile_while_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        let (while_expr, while_stmt_list) = match stmt {
+            Statement::While(while_expr, while_stmt_list) => (while_expr, while_stmt_list),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let while_fn_ctx = FunctionContext::new_loop(self.get_current_function()?)?;
+        self.push_function_context(while_fn_ctx);
+        let while_start_pos = self.builder.get_current_offset();
+        let tag_end = self.uid_generator.generate();
+        let mut while_loop_ctx = LoopContext::new(while_start_pos, tag_end);
+        self.push_loop_context(while_loop_ctx);
+
+        // Check type of while expr
+        let expr_type = self.check_expr_type(while_expr)?;
+        // Only boolean expr are allowed
+        if expr_type != Type::Bool {
+            return Err(CompilerError::TypeMismatch(Type::Bool, expr_type.clone()));
+        }
+
+        // Compile the expression
+        self.compile_expr(while_expr)?;
+
+        let last_reg = {
+            self.get_current_function()?
+                .register_allocator
+                .get_last_temp_register()?
+        };
+
+        self.builder.tag(tag_end);
+        let jmpf_instr = Instruction::new(Opcode::JMPF)
+            .with_operand::<u8>(last_reg.into())
+            .with_operand(tag_end);
+        self.builder.push_instr(jmpf_instr);
+
+        // Compile the statement list
+        self.compile_stmt_list(while_stmt_list)?;
+
+        // Compile a continue statement
+        self.compile_continue_stmt(&Statement::Continue)?;
+
+        // This is the end of this while loop
+        let while_end_pos = self.builder.get_current_offset();
+        
+        // Pop the while loop off the stack
+        while_loop_ctx = self.pop_loop_context()?;
+        let instr_pos_list = self.builder.get_tag(&while_loop_ctx.tag_end)
+            .ok_or(CompilerError::Unknown)?;
+        
+        // Update with correct end position
+        for instr_pos in instr_pos_list {
+            let jmpf_instr = self.builder.get_instr(&instr_pos)
+                .ok_or(CompilerError::Unknown)?;
+            jmpf_instr.remove_operand_bytes(8);
+            jmpf_instr.append_operand::<u64>(while_end_pos as u64);
+        }
+
+        // Pop this while loops fn context off the stack
+        self.pop_function_context()?;
+
+        Ok(())
     }
 
     /// Compiles a break statement
-    pub fn compile_break_stmt(&mut self, _stmt: &Statement) -> CompilerResult<()> {
-        Err(CompilerError::Unimplemented(format!("Break statement compilation not implemented!")))
+    pub fn compile_break_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        if *stmt != Statement::Break {
+            return Err(CompilerError::Unknown);
+        }
+
+        // Compile the stack cleanup
+        self.compile_stack_loop()?;
+
+        let tag_end = {
+            self.get_current_loop()?
+                .tag_end
+        };
+
+        // Tag this instruction
+        self.builder.tag(tag_end);
+        // JMP to end instr
+        let jmp_end_instr = Instruction::new(Opcode::JMP)
+            .with_operand::<u64>(tag_end);
+        self.builder.push_instr(jmp_end_instr);
+
+        Ok(())
     }
 
     /// Compiles a continue statement
-    pub fn compile_continue_stmt(&mut self, _stmt: &Statement) -> CompilerResult<()> {
-        Err(CompilerError::Unimplemented(format!("Continue statement compilation not implemented!")))
+    pub fn compile_continue_stmt(&mut self, stmt: &Statement) -> CompilerResult<()> {
+        if *stmt != Statement::Continue {
+            return Err(CompilerError::Unknown);
+        }
+
+        // Compile the stack cleanup
+        self.compile_stack_loop()?;
+
+        let loop_start_pos = {
+            self.get_current_loop()?
+                .pos_start
+        };
+
+        // JMP to begin instr
+        let jmp_begin_instr = Instruction::new(Opcode::JMP)
+            .with_operand::<u64>(loop_start_pos as u64);
+        self.builder.push_instr(jmp_begin_instr);
+        
+        Ok(())
     }
 
     /// Compiles a return statement
@@ -1063,7 +1365,7 @@ impl Compiler {
         }
 
         // Clean up the stack.
-        self.compile_stack_cleanup_and_return()?;
+        self.compile_stack_cleanup_return()?;
 
         // Add the RET function
         let ret_instr = Instruction::new(Opcode::RET);
@@ -1268,23 +1570,43 @@ impl Compiler {
                 self.builder.push_instr(ldb_instr);
             },
             Expression::StringLiteral(string) => {
-                let (string_size, string_addr) = self.data.get_string_slice(string);
+                let string = String::from(&string[1..string.len() - 1]);
+                let (string_size, string_addr) = self.data.get_string_slice(&string);
                 let stack_inc_instr = Instruction::new_inc_stack(16);
+                self.inc_stack(16)?;
+
+                let size_reg = self.get_next_register()?;
+                let addr_reg = self.get_next_register()?;
+                
                 let size_lda_instr = Instruction::new(Opcode::LDA)
                     .with_operand(string_size)
-                    .with_operand::<u8>(Register::SP.into())
-                    .with_operand::<i16>(-16);
+                    .with_operand::<u8>(size_reg.clone().into());
                 let addr_lda_instr = Instruction::new(Opcode::LDA)
                     .with_operand(string_addr)
+                    .with_operand::<u8>(addr_reg.clone().into());
+                let mov_size_instr = Instruction::new(Opcode::MOVA_RA)
+                    .with_operand::<u8>(size_reg.into())
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-16);
+                let mov_addr_instr = Instruction::new(Opcode::MOVA_RA)
+                    .with_operand::<u8>(addr_reg.into())
                     .with_operand::<u8>(Register::SP.into())
                     .with_operand::<i16>(-8);
-                self.inc_stack(16)?;
+
                 self.builder.push_instr(stack_inc_instr);
                 self.builder.push_instr(size_lda_instr);
                 self.builder.push_instr(addr_lda_instr);
+                self.builder.push_instr(mov_size_instr);
+                self.builder.push_instr(mov_addr_instr);
             },
             Expression::Variable(_) => {
                 self.compile_var_expr(expr)?;
+            },
+            Expression::Call(_, _) => {
+                self.compile_call_expr(expr)?;
+                self.get_current_function_mut()?
+                    .register_allocator
+                    .force_temp_register(Register::R0)
             },
             Expression::Addition(lhs, rhs) => {
                 let expr_type = self.check_expr_type(lhs)?;
@@ -1632,7 +1954,6 @@ impl Compiler {
                     _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
                 };
             },
-
             Expression::NotEquals(lhs, rhs) => {
                 let expr_type = self.check_expr_type(lhs)?;
                 self.compile_expr(lhs)?;
@@ -1671,7 +1992,6 @@ impl Compiler {
                     _ => return Err(CompilerError::UnsupportedExpression(lhs.deref().clone()))
                 };
             },
-
             Expression::Not(op) => {
                 self.compile_expr(op)?;
                 let (op_reg, target_reg) = {
@@ -1685,10 +2005,143 @@ impl Compiler {
                     .with_operand::<u8>(target_reg.into());
                 self.builder.push_instr(not_instr);
             },
+            Expression::And(lhs, rhs) => {
+                self.compile_expr(lhs)?;
+                let lhs_reg = self.get_last_register()?;
+                self.compile_expr(rhs)?;
+                let rhs_reg = self.get_last_register()?;
+                let target_reg = self.get_next_register()?;
+                let and_instr = Instruction::new(Opcode::AND)
+                    .with_operand::<u8>(lhs_reg.into())
+                    .with_operand::<u8>(rhs_reg.into())
+                    .with_operand::<u8>(target_reg.into());
+                self.builder.push_instr(and_instr);
+            },
+            Expression::Or(lhs, rhs) => {
+                self.compile_expr(lhs)?;
+                let lhs_reg = self.get_last_register()?;
+                self.compile_expr(rhs)?;
+                let rhs_reg = self.get_last_register()?;
+                let target_reg = self.get_next_register()?;
+                let or_instr = Instruction::new(Opcode::OR)
+                    .with_operand::<u8>(lhs_reg.into())
+                    .with_operand::<u8>(rhs_reg.into())
+                    .with_operand::<u8>(target_reg.into());
+                self.builder.push_instr(or_instr);
+            },
             _ => return Err(CompilerError::UnsupportedExpression(expr.clone()))
         };
         Ok(())
         //Err(CompilerError::Unimplemented(format!("Expr compilation not implemented!")))
+    }
+
+    /// Compiles a call expresion
+    pub fn compile_call_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        let (fn_name, fn_arg_exprs) = match expr {
+            Expression::Call(fn_name, fn_args) => (fn_name, fn_args),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let fn_def = self.resolve_function(fn_name)?;
+
+        let fn_ret_size = self.get_size_of_type(&fn_def.ret_type)?;
+
+        if fn_arg_exprs.len() != fn_def.arguments.len() {
+            return Err(CompilerError::UnknownFunction(fn_name.clone()));
+        }
+
+        let mut stack_size = self.get_stack_size()?;
+
+        for i in 0..fn_def.arguments.len() {
+            let expr_type = self.check_expr_type(&fn_arg_exprs[i])?;
+            let fn_arg_type = &fn_def.arguments[i].1;
+
+            if *fn_arg_type != expr_type {
+                return Err(CompilerError::TypeMismatch(fn_arg_type.clone(), expr_type.clone()));
+            }
+
+            // Compile this expr
+            self.compile_expr(&fn_arg_exprs[i])?;
+
+            let curr_stack_size = self.get_stack_size()?;
+
+            let stack_diff = curr_stack_size - stack_size;
+
+            let size = self.get_size_of_type(&expr_type)?;
+
+            if size > 8 && stack_diff > 0 {
+                let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-(size as i16))
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-(stack_diff as i16))
+                    .with_operand::<u32>(size as u32);
+                let stack_dec_instr = Instruction::new_dec_stack(stack_diff);
+                self.builder.push_instr(mov_stack_instr);
+                self.builder.push_instr(stack_dec_instr);
+                self.dec_stack(stack_diff)?;
+            }
+
+            let last_reg = {
+                self.get_current_function()?
+                    .register_allocator
+                    .get_last_temp_register()?
+            };
+
+            let stack_instr = Instruction::new_inc_stack(size);
+            self.builder.push_instr(stack_instr);
+            self.inc_stack(size)?;
+
+            let mov_instr_opt = match expr_type {
+                Type::Int => {
+                    Some(Instruction::new(Opcode::MOVI_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::Float => {
+                    Some(Instruction::new(Opcode::MOVI_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::Bool => {
+                    Some(Instruction::new(Opcode::MOVI_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::String => None,
+                _ => return Err(CompilerError::UnknownType(expr_type))
+            };
+
+            if mov_instr_opt.is_some() {
+                self.builder.push_instr(mov_instr_opt.unwrap());
+            }
+
+            stack_size = self.get_stack_size()?;
+        }
+
+        let call_instr = Instruction::new(Opcode::CALL)
+            .with_operand::<u64>(fn_def.uid);
+        self.builder.push_instr(call_instr);
+        self.inc_stack(fn_ret_size)?;
+
+        let stack_diff = self.get_stack_size()? - stack_size;
+        let pop_size = stack_diff - fn_ret_size;
+
+        let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<i16>(-(fn_ret_size as i16))
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<i16>(-(stack_diff as i16))
+            .with_operand::<u32>(fn_ret_size as u32);
+        let stack_dec_instr = Instruction::new_dec_stack(pop_size);
+        self.dec_stack(pop_size)?;
+        self.builder.push_instr(mov_stack_instr);
+        self.builder.push_instr(stack_dec_instr);
+
+        Ok(())
     }
 
     /// Compiles a variable expression
@@ -1744,7 +2197,8 @@ impl Compiler {
                             .with_operand::<u8>(Register::SP.into())
                             .with_operand::<i16>(var_offset as i16)
                             .with_operand::<u8>(Register::SP.into())
-                            .with_operand::<i16>(-16);
+                            .with_operand::<i16>(-16)
+                            .with_operand::<u32>(16);
                         self.builder.push_instr(stack_inc_instr);
                         self.builder.push_instr(movn_instr);
                     },
@@ -1772,6 +2226,7 @@ impl Compiler {
 
     /// Returns the type of an expression and checks for type mismatches
     pub fn check_expr_type(&self, expr: &Expression) -> CompilerResult<Type> {
+        //println!("Checking type of expr: {:?}", expr);
         let expr_type = match expr {
             Expression::IntLiteral(_) => Type::Int,
             Expression::FloatLiteral(_) => Type::Float,
@@ -1872,6 +2327,22 @@ impl Compiler {
                 let op_type = self.check_expr_type(op)?;
                 if Type::Bool != op_type {
                     return Err(CompilerError::TypeMismatch(Type::Bool, op_type));
+                }
+                Type::Bool
+            },
+            Expression::And(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CompilerError::TypeMismatch(lhs_type, rhs_type));
+                }
+                Type::Bool
+            },
+            Expression::Or(lhs, rhs) => {
+                let lhs_type = self.check_expr_type(lhs)?;
+                let rhs_type = self.check_expr_type(rhs)?;
+                if lhs_type != rhs_type {
+                    return Err(CompilerError::TypeMismatch(lhs_type, rhs_type));
                 }
                 Type::Bool
             },

@@ -27,6 +27,7 @@ use std::{
     }
 };
 
+#[derive(Debug)]
 pub struct ModuleContext {
     pub name: String,
     pub modules: HashMap<String, ModuleContext>,
@@ -104,6 +105,7 @@ impl ModuleContext {
     }
 }
 
+#[derive(Debug)]
 pub enum VariableLocation {
     Stack(i64),
     Register(Register)
@@ -113,6 +115,7 @@ pub enum VariableLocation {
 pub struct FunctionContext {
     pub def: Option<FunctionDef>,
     pub weak: bool,
+    pub is_loop: bool,
     pub stack_size: usize,
     variable_types: HashMap<String, Type>,
     variable_positions: HashMap<String, i64>,
@@ -141,6 +144,7 @@ impl FunctionContext {
             FunctionContext {
                 def: Some(def),
                 weak: false,
+                is_loop: false,
                 stack_size: 0,
                 variable_types: variable_types,
                 variable_positions: variable_positions,
@@ -166,6 +170,33 @@ impl FunctionContext {
             FunctionContext {
                 def: None,
                 weak: true,
+                is_loop: false,
+                stack_size: 0,
+                variable_types: fn_ctx.variable_types.clone(),
+                variable_positions: variable_positions,
+                register_allocator: RegisterAllocator::new()
+            }
+        )
+    }
+
+    pub fn new_loop(fn_ctx: &FunctionContext) -> CompilerResult<FunctionContext> {
+        let stack_size = fn_ctx.stack_size as i64;
+
+        let mut variable_positions = HashMap::new();
+
+        for (var_name, var_pos) in fn_ctx.variable_positions.iter() {
+            let var_offset = var_pos - stack_size;
+            if var_offset >= 0 {
+                return Err(CompilerError::Unknown);
+            }
+            variable_positions.insert(var_name.clone(), var_offset);
+        }
+
+        Ok(
+            FunctionContext {
+                def: None,
+                weak: true,
+                is_loop: true,
                 stack_size: 0,
                 variable_types: fn_ctx.variable_types.clone(),
                 variable_positions: variable_positions,
@@ -219,15 +250,15 @@ impl FunctionContext {
 }
 
 pub struct LoopContext {
-    pub instr_start: usize,
-    pub instr_end: usize
+    pub pos_start: usize,
+    pub tag_end: u64
 }
 
 impl LoopContext {
-    pub fn new(start: usize) -> LoopContext {
+    pub fn new(start: usize, tag_end: u64) -> LoopContext {
         LoopContext {
-            instr_start: start,
-            instr_end: start
+            pos_start: start,
+            tag_end: tag_end
         }
     }
 }

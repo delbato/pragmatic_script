@@ -15,6 +15,3 @@ pub mod codegen;
 pub mod engine;
 
 pub mod api;
-
-#[cfg(test)]
-mod test;

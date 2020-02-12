@@ -96,7 +96,19 @@ impl Engine {
     pub fn load_code(&mut self, code: &str) -> EngineResult<()> {
         let parser = Parser::new(String::from(code));
         let decl_list = parser.parse_root_decl_list()
-            .map_err(|p| Box::new(EngineError::ParseError(p)))?;
+            .map_err(|p| {
+                let mut offset = 0;
+                let token_range = p.token_pos.clone();
+                let mut line_nr = 0;
+                for line in code.lines() {
+                    if offset <= token_range.start && offset + line.len() >= token_range.end {
+                        println!("Parse error in line #{} at offset {}", line_nr, token_range.start - offset);
+                    }
+                    offset += line.len();
+                    line_nr += 1;
+                }
+                Box::new(EngineError::ParseError(p))
+            })?;
         self.compiler.compile_root(&decl_list)
             .map_err(|c| Box::new(EngineError::CompileError(c)))?;
         let program = self.compiler.get_program()
@@ -142,10 +154,17 @@ impl Engine {
         self.core.get_stack_size()
     }
 
-    pub fn run_fn(&mut self, name: &String) -> EngineResult<()> {
-        let fn_uid = self.compiler.get_function_uid(name)
+    pub fn run_fn<T>(&mut self, name: T) -> EngineResult<()>
+        where String: From<T> {
+        let name = String::from(name);
+        let fn_uid = self.compiler.get_function_uid(&name)
             .map_err(|ce| EngineError::CompileError(ce))?;
         self.core.run_fn(fn_uid)
             .map_err(|c| Box::new(EngineError::CoreError(c)))
+    }
+
+    pub fn register_module(&mut self, module: Module) -> EngineResult<()> {
+        self.compiler.register_foreign_root_module(module)
+            .map_err(|ce| Box::new(EngineError::CompileError(ce)))
     }
 }
