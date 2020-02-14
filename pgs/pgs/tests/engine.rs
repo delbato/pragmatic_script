@@ -233,3 +233,87 @@ fn test_engine_foreign_module() {
     assert_eq!(0, engine.get_stack_size());
     assert_eq!(7, reg_val_res.unwrap());
 }
+
+#[test]
+fn test_engine_cont_simple() {
+    let code = String::from("
+        mod: inner {
+            cont: Vector {
+                x: float;
+                y: float;
+            }
+        }
+
+        fn: main() {
+            var vec = inner::Vector {
+                x: 10.0,
+                y: 5.0
+            };
+
+            vec.x *= 0.0-1.0;
+            vec.y /= 2.0;
+
+            std::print(\"x:\");
+            std::printf(vec.x);
+            std::print(\", y:\");
+            std::printf(vec.y);
+            std::println(\" \");
+        }
+    ");
+    let printf_function = Function::new("printf")
+        .with_arg(Type::Float)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter| {
+            let arg: f32 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let printi_function = Function::new("printi")
+        .with_arg(Type::Int)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling printi!");
+            let arg: i64 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let print_function = Function::new("print")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling print!");
+            let arg: String = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let println_function = Function::new("println")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling println!");
+            let arg: String = adapter.get_arg(0);
+            println!("{}", arg);
+        }));
+    let std_module = Module::new("std")
+        .with_function(printi_function)
+        .with_function(println_function)
+        .with_function(print_function)
+        .with_function(printf_function);
+    
+    let mut engine = Engine::new(1024);
+
+    let reg_res = engine.register_module(std_module);
+    //println!("{:?}", reg_res);
+    assert!(reg_res.is_ok());
+
+    let load_res = engine.load_code(&code);
+    println!("{:?}", load_res);
+    assert!(load_res.is_ok());
+
+    let mut offset = 0;
+    for instr in engine.compiler.get_builder().instructions.iter() {
+        println!("{}: {:?}", offset, instr);
+        offset += instr.get_size();
+    }
+
+    let run_res = engine.run_fn("root::main");
+    //println!("{:?}", run_res);
+    assert!(run_res.is_ok());
+}

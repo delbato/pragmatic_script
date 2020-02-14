@@ -121,6 +121,12 @@ pub enum Token {
     #[token = ";"]
     Semicolon,
 
+    #[token = "["]
+    OpenBracket,
+
+    #[token = "]"]
+    CloseBracket,
+
     #[token = ":"]
     Colon,
 

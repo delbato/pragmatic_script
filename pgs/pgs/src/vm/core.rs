@@ -13,7 +13,8 @@ use super::{
 };
 use crate::{
     codegen::{
-        program::Program
+        program::Program,
+        uid_generator::UIDGenerator
     },
     api::{
         module::Module,
@@ -36,14 +37,21 @@ use std::{
         RefCell
     },
     convert::TryFrom,
-    ops::Range,
+    ops::{
+        Deref,
+        Range
+    },
     fmt::{
         Debug,
         Display,
         Formatter,
         Result as FmtResult
     },
-    error::Error
+    error::Error,
+    sync::{
+        Arc,
+        Mutex
+    }
 };
 
 use serde::{
@@ -74,10 +82,10 @@ pub struct Core {
     stack: Vec<u8>,
     heap: Vec<u8>,
     heap_pointers: Vec<Range<usize>>,
+    foreign_pointers: HashMap<u64, u64>,
     foreign_function_uids: HashSet<u64>,
     swap: Vec<u8>,
     program: Option<Program>,
-    stack_frames: VecDeque<usize>,
     call_stack: VecDeque<usize>,
     registers: [Register; 16],
     ip: Register,
@@ -126,8 +134,8 @@ impl Core {
             stack: stack,
             heap: Vec::new(),
             heap_pointers: Vec::new(),
+            foreign_pointers: HashMap::new(),
             foreign_function_uids: HashSet::new(),
-            stack_frames: VecDeque::new(),
             call_stack: VecDeque::new(),
             registers: [Register::new(); 16],
             ip: Register::new(),
@@ -1109,6 +1117,55 @@ impl Core {
         self.ip.set(*new_ip);
 
         Ok(())
+    }
+
+    /// Retrieves a foreign pointer and returns the correct
+    /// Arc<Mutex<T>> if found.
+    pub fn get_foreign_ptr<T>(&self, ptr: u64) -> CoreResult<Arc<Mutex<T>>> {
+        let arc_box_int = self.foreign_pointers.get(&ptr)
+            .ok_or(CoreError::Unknown)?;
+        let arc = unsafe {
+            let arc_box_raw: *mut Arc<Mutex<T>> = std::mem::transmute(*arc_box_int);
+            let arc_box = Box::from_raw(arc_box_raw);
+            let ret = arc_box.deref().clone();
+            std::mem::forget(arc_box);
+            ret
+        };
+        Ok(arc)
+    }
+
+    /// Inserts a foreign pointer
+    pub fn insert_foreign_ptr<T>(&mut self, item: Arc<Mutex<T>>) -> CoreResult<u64> {
+        let mut uid_gen = UIDGenerator::new();
+
+        let mut addr = Address::new(uid_gen.generate(), AddressType::Foreign);
+        while self.foreign_pointers.contains_key(&addr.raw_address) {
+            addr = Address::new(uid_gen.generate(), AddressType::Foreign);
+        }
+
+        let ptr = addr.into();
+        
+        let arc_box = Box::new(item);
+        let arc_box_int: u64 = unsafe {
+            let arc_box_raw = Box::into_raw(arc_box);
+            std::mem::transmute(arc_box_raw)
+        };
+
+        self.foreign_pointers.insert(ptr, arc_box_int);
+
+        Ok(ptr)
+    }
+
+    /// Removes a foreign pointer
+    pub fn remove_foreign_ptr<T>(&mut self, ptr: u64) -> CoreResult<Arc<Mutex<T>>> {
+        let arc_box_int = self.foreign_pointers.remove(&ptr)
+            .ok_or(CoreError::Unknown)?;
+        let arc = unsafe {
+            let arc_box_raw: *mut Arc<Mutex<T>> = std::mem::transmute(arc_box_int);
+            let arc_box = Box::from_raw(arc_box_raw);
+            *arc_box
+        };
+        Ok(arc)
     }
 
     fn call_foreign_fn(&mut self, uid: u64) -> CoreResult<()> {

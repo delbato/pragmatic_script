@@ -20,6 +20,13 @@ use crate::{
     }
 };
 
+use std::{
+    sync::{
+        Arc,
+        Mutex
+    }
+};
+
 use serde::{
     de::DeserializeOwned
 };
@@ -45,6 +52,22 @@ impl<'c> Adapter<'c> {
     pub fn return_value<T>(&mut self, value: T)
     where RegisterUnion: RegisterAccess<T> {
         self.core.reg(Register::R0.into()).unwrap().set::<T>(value);
+    }
+
+    // Retrieves a foreign pointer and returns the correct
+    /// Arc<Mutex<T>> if found.
+    pub fn get_foreign_ptr<T>(&self, ptr: u64) -> Arc<Mutex<T>> {
+        self.core.get_foreign_ptr(ptr).unwrap()
+    }
+
+    /// Inserts a foreign pointer
+    pub fn insert_foreign_ptr<T>(&mut self, item: Arc<Mutex<T>>) -> u64 {
+        self.core.insert_foreign_ptr(item).unwrap()
+    }
+
+    /// Removes a foreign pointer
+    pub fn remove_foreign_ptr<T>(&mut self, ptr: u64) -> Arc<Mutex<T>> {
+        self.core.remove_foreign_ptr(ptr).unwrap()
     }
 }
 
@@ -74,6 +97,14 @@ impl FromArg for i64 {
 
 impl FromArg for f32 {
     fn get(adapter: &mut Adapter, arg_index: usize) -> f32 {
+        let arg_offset = adapter.function.get_arg_offset(arg_index) as i16;
+        let addr = adapter.core.reg(16).unwrap().get::<u64>();
+        adapter.core.mem_get((addr, arg_offset)).unwrap()
+    }
+}
+
+impl FromArg for u64 {
+    fn get(adapter: &mut Adapter, arg_index: usize) -> u64 {
         let arg_offset = adapter.function.get_arg_offset(arg_index) as i16;
         let addr = adapter.core.reg(16).unwrap().get::<u64>();
         adapter.core.mem_get((addr, arg_offset)).unwrap()

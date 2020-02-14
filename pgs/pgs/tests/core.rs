@@ -75,3 +75,55 @@ fn test_push_pop_stack() {
     assert!(stack_res.is_ok());
     assert_eq!(stack_res.unwrap(), 4);
 }
+
+#[test]
+fn test_core_foreign_ptr() {
+    use std::{
+        sync::{
+            Arc,
+            Mutex
+        },
+        ops::Drop
+    };
+
+    #[derive(Debug)]
+    struct Int(i32);
+
+    impl Drop for Int {
+        fn drop(&mut self) {
+            println!("Int with val {} dropped!", self.0);
+        }
+    }
+
+    let mut int_arc = Arc::new(Mutex::new(Int(0)));
+
+    let mut core = Core::new(1024);
+    let ptr_res = core.insert_foreign_ptr(int_arc);
+    println!("{:?}", ptr_res);
+    assert!(ptr_res.is_ok());
+    let ptr = ptr_res.unwrap();
+
+    {
+        let get_res = core.get_foreign_ptr(ptr);
+        println!("{:?}", get_res);
+        assert!(get_res.is_ok());
+
+        int_arc = get_res.unwrap();
+    }
+
+    {
+        let mut int = int_arc.lock().unwrap();
+        int.0 += 10;
+    }
+
+    let remove_res = core.remove_foreign_ptr(ptr);
+    println!("{:?}", remove_res);
+    assert!(remove_res.is_ok());
+
+    int_arc = remove_res.unwrap();
+
+    {
+        let int = int_arc.lock().unwrap();
+        assert_eq!(int.0, 10);
+    }
+}

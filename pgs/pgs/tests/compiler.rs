@@ -185,3 +185,43 @@ fn test_compile_while_stmt() {
         pos += instr.get_size();
     }
 }
+
+#[test]
+fn test_compile_cont_instance() {
+    let code = String::from("
+        cont: Vector {
+            x: int;
+            y: int;
+        }
+        fn: main() {
+            var v = Vector {
+                x: 12,
+                y: 4
+            };
+            
+            var x = v.x;
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+    let mut lexer = Token::lexer(code.as_str());
+    
+    let decl_list_res = parser.parse_decl_list(&mut lexer, &[]);
+    assert!(decl_list_res.is_ok());
+
+    let decl_list = decl_list_res.unwrap();
+
+    let mut compiler = Compiler::new();
+    let compile_res = compiler.compile_root(&decl_list);
+    println!("{:?}", compile_res);
+    assert!(compile_res.is_ok());
+
+    let builder = compiler.get_builder();
+
+    let mut pos = 0;
+
+    for instr in builder.instructions.iter() {
+        println!("{}:  {:?}", pos, instr);
+        pos += instr.get_size();
+    }
+}

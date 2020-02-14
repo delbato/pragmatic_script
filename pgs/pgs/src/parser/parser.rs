@@ -61,6 +61,10 @@ pub enum ParseErrorType {
     ExpectedMemberType,
     ExpectedMemberName,
     ExpectedContainerName,
+    ExpectedArraySize,
+    ExpectedCloseBracket,
+    InvalidTypename(String),
+    InvalidTokenInTypename(Token),
     DuplicateMember,
     ExpectedImport,
     ExpectedImportString,
@@ -501,20 +505,7 @@ impl Parser {
 
         if lexer.token == Token::Tilde {
             lexer.advance();
-            fn_return_type = match lexer.token {
-                Token::Int => Type::Int,
-                Token::Float => Type::Float,
-                Token::String => Type::String,
-                Token::Bool => Type::Bool,
-                Token::Text => {
-                    let type_name = String::from(lexer.slice());
-                    Type::Other(type_name)
-                },
-                _ => {
-                    return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
-                }
-            };
-
+            fn_return_type = self.parse_type(lexer)?;
             lexer.advance();
         } else {
             fn_return_type = Type::Void;
@@ -594,7 +585,7 @@ impl Parser {
     pub fn parse_fn_arg(&self, lexer: &mut Lexer) -> ParseResult<(String, Type)> {
         let mut lexer_backup = lexer.clone();
         
-        // Special case for argument "self"
+        // Special case for argument "this"
         if lexer.token == Token::And {
             // Swallow "&"
             lexer.advance();
@@ -625,15 +616,7 @@ impl Parser {
         lexer.advance();
 
 
-        let arg_type = match lexer.token {
-            Token::Int => Type::Int,
-            Token::Float => Type::Float,
-            Token::String => Type::String,
-            _ => {
-                *lexer = lexer_backup;
-                return Err(ParseError::new(ParseErrorType::ExpectedArgType, lexer.range()));
-            }
-        };
+        let arg_type = self.parse_type(lexer)?;
 
         Ok(
             (arg_name, arg_type)
@@ -686,6 +669,64 @@ impl Parser {
         )
     }
 
+    pub fn parse_type(&self, lexer: &mut Lexer) -> ParseResult<Type> {
+        let ret_type = match lexer.token {
+            Token::Int => Type::Int,
+            Token::Float => Type::Float,
+            Token::Bool => Type::Float,
+            Token::String => Type::String,
+            Token::And => {
+                // Swallow "&"
+                lexer.advance();
+                let inner_type = self.parse_type(lexer)?;
+                Type::Reference(Box::new(inner_type))
+            },
+            Token::OpenBracket => {
+                // Swallow "["
+                lexer.advance();
+                let arr_type = self.parse_type(lexer)?;
+                let mut arr_size = None;
+                if lexer.token == Token::Semicolon {
+                    // Swallow ";"
+                    lexer.advance();
+                    if lexer.token != Token::IntLiteral {
+                        return make_parse_error!(lexer, ParseErrorType::ExpectedArraySize);
+                    }
+                    let arr_size_raw = String::from(lexer.slice());
+                    arr_size = Some(
+                        arr_size_raw.parse::<usize>()
+                            .map_err(|_| ParseError::new(ParseErrorType::Unknown, lexer.range()))?
+                    );
+                    // Swallow arr size
+                    lexer.advance();
+                }
+                if lexer.token != Token::CloseBracket {
+                    return make_parse_error!(lexer, ParseErrorType::ExpectedCloseBracket);
+                }
+                lexer.advance();
+                if arr_size.is_none() {
+                    Type::AutoArray(Box::new(arr_type))
+                } else {
+                    Type::Array(Box::new(arr_type), arr_size.unwrap())
+                }
+            },
+            Token::Text => {
+                let mut typename = String::new();
+                while lexer.token == Token::Text ||
+                    lexer.token == Token::DoubleColon {
+                    typename += lexer.slice();
+                    lexer.advance();
+                }
+                if typename.ends_with("::") {
+                    return make_parse_error!(lexer, ParseErrorType::InvalidTypename(typename));
+                }
+                Type::Other(typename)
+            },
+            _ => return make_parse_error!(lexer, ParseErrorType::InvalidTokenInTypename(lexer.token.clone()))
+        };
+        Ok(ret_type)
+    }
+
     pub fn parse_container_members(&self, lexer: &mut Lexer) -> ParseResult<Vec<(String, Type)>> {
         let mut ret = Vec::new();
         let mut members = HashSet::new();
@@ -724,27 +765,7 @@ impl Parser {
         // Swallow ":"
         lexer.advance();
 
-        let member_type = match lexer.token {
-            Token::Int => Type::Int,
-            Token::Float => Type::Float,
-            Token::String => Type::String,
-            Token::Bool => Type::Bool,
-            Token::Text => {
-                let mut type_name = String::from(lexer.slice());
-                // Workaround for broken Lexer
-                if type_name.len() == 1 {
-                    let lexer_backup = lexer.clone();
-                    lexer.advance();
-                    if lexer.token == Token::Text {
-                        type_name += lexer.slice();
-                    } else {
-                        *lexer = lexer_backup;
-                    }
-                }
-                Type::Other(type_name)
-            },
-            _ => return Err(ParseError::new(ParseErrorType::ExpectedMemberType, lexer.range()))
-        };
+        let member_type = self.parse_type(lexer)?;
 
         // Swallow member type
         lexer.advance();
@@ -1120,29 +1141,7 @@ impl Parser {
             // Swallow ":"
             lexer.advance();
 
-            var_type = match lexer.token {
-                Token::Int => Type::Int,
-                Token::Float => Type::Float,
-                Token::String => Type::String,
-                Token::Bool => Type::Bool,
-                Token::Text => {
-                    let mut type_name = String::from(lexer.slice());
-                    // Workaround for broken Lexer
-                    if type_name.len() == 1 {
-                        let lexer_backup = lexer.clone();
-                        lexer.advance();
-                        if lexer.token == Token::Text {
-                            type_name += lexer.slice();
-                        } else {
-                            *lexer = lexer_backup;
-                        }
-                    }
-                    Type::Other(type_name)
-                },
-                _ => {
-                    return Err(ParseError::new(ParseErrorType::UnknownType, lexer.range()));
-                }
-            };
+            var_type = self.parse_type(lexer)?;
             // Swallow type
             lexer.advance();
         }
@@ -1357,15 +1356,25 @@ impl Parser {
         Ok(expr)
     }
 
-    pub fn try_parse_cont_instance(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
-        let lexer_backup = lexer.clone();
-        if lexer.token != Token::Text {
+    pub fn parse_mod_path(&self, lexer: &mut Lexer) -> ParseResult<String> {
+        let mut name = String::new();
+        while lexer.token == Token::Text ||
+            lexer.token == Token::DoubleColon {
+            name += lexer.slice();
+            lexer.advance();
+        }
+
+        if name.ends_with("::") {
             return make_parse_error!(lexer, ParseErrorType::ExpectedContainerName);
         }
 
-        let cont_name = String::from(lexer.slice());
-        // Swallow cont name
-        lexer.advance();
+        Ok(name)
+    }
+
+    pub fn try_parse_cont_instance(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
+        let lexer_backup = lexer.clone();
+        
+        let cont_name = self.parse_mod_path(lexer)?;
 
         if lexer.token != Token::OpenBlock {
             *lexer = lexer_backup;
@@ -1435,31 +1444,7 @@ impl Parser {
     pub fn try_parse_call_expr(&self, lexer: &mut Lexer) -> ParseResult<Expression> {
         let lexer_backup = lexer.clone(); // Create lexer backup for backtracking
 
-        if lexer.token != Token::Text {
-            return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
-        }
-        
-        let mut full_fn_name = String::new();
-
-        loop {
-            if lexer.token != Token::Text {
-                return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));
-            }
-
-            full_fn_name += lexer.slice();
-
-            // Swallow fn name
-            lexer.advance();
-
-            if lexer.token != Token::DoubleColon {
-                break;
-            }
-
-            // Swallow "::"
-            lexer.advance();
-
-            full_fn_name += "::";
-        }
+        let full_fn_name = self.parse_mod_path(lexer)?;
 
         if full_fn_name.is_empty() {
             return Err(ParseError::new(ParseErrorType::ExpectedFunctionName, lexer.range()));

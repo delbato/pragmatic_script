@@ -17,7 +17,8 @@ use crate::{
 
 use std::{
     collections::{
-        HashMap
+        HashMap,
+        BTreeMap
     },
     convert::{
         From
@@ -78,6 +79,7 @@ impl From<&FunctionDeclArgs> for FunctionDef {
 pub struct ContainerDef {
     pub name: String,
     pub member_variables: HashMap<String, Type>,
+    pub member_indices: BTreeMap<String, usize>,
     pub member_functions: HashMap<String, FunctionDef>
 }
 
@@ -86,6 +88,7 @@ impl ContainerDef {
     pub fn new(name: String) -> ContainerDef {
         ContainerDef {
             name: name,
+            member_indices: BTreeMap::new(),
             member_functions: HashMap::new(),
             member_variables: HashMap::new()
         }
@@ -96,7 +99,9 @@ impl ContainerDef {
         if self.member_variables.contains_key(&var.0) {
             return Err(CompilerError::DuplicateMember(var.0));
         }
-        self.member_variables.insert(var.0, var.1);
+        self.member_variables.insert(var.0.clone(), var.1);
+        let index = self.member_indices.len();
+        self.member_indices.insert(var.0, index);
         Ok(())
     }
 
@@ -109,6 +114,28 @@ impl ContainerDef {
         Ok(())
     }
 
+    /// Gets the byte offset of a member
+    pub fn get_member_offset(&self, compiler: &Compiler, var_name: &String) -> CompilerResult<usize> {
+        let target_index = self.get_member_index(var_name)?;
+        let mut offset = 0;
+        for (member_name, member_index) in self.member_indices.iter() {
+            let member_type = self.get_member_type(member_name)?;
+            let member_size = compiler.get_size_of_type(&member_type)?;
+            if *member_index == target_index {
+                break;
+            }
+            offset += member_size;
+        }
+        Ok(offset)
+    }
+
+    /// Returns the type of a member
+    pub fn get_member_type(&self, var_name: &String) -> CompilerResult<Type> {
+        self.member_variables.get(var_name)
+            .cloned()
+            .ok_or(CompilerError::UnknownMember(var_name.clone()))
+    }
+
     /// Returns the byte size of this container
     pub fn get_size(&self, compiler: &Compiler) -> CompilerResult<usize> {
         let mut size = 0;
@@ -116,6 +143,20 @@ impl ContainerDef {
             size += compiler.get_size_of_type(var_type)?;
         }
         Ok(size)
+    }
+
+    /// Returns the index of a member
+    pub fn get_member_index(&self, name: &String) -> CompilerResult<usize> {
+        self.member_indices.get(name)
+            .cloned()
+            .ok_or(CompilerError::UnknownMember(name.clone()))
+    }
+
+    /// Merges a container declaration into an existing containerdef
+    pub fn merge_cont_decl(&mut self, item: &ContainerDeclArgs) {
+        for member in item.members.iter() {
+            self.add_member_variable(member.clone()).unwrap();
+        }
     }
 }
 

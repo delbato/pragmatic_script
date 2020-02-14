@@ -2,7 +2,8 @@ use std::{
     collections::{
         HashMap,
         BTreeMap
-    }
+    },
+    ops::Deref
 };
 
 #[derive(PartialEq, Debug, Clone)]
@@ -157,7 +158,8 @@ pub enum Declaration {
     Module(String, Vec<Declaration>),
     Container(ContainerDeclArgs),
     Import(String, String),
-    Impl(String, String, Vec<Declaration>)
+    Impl(String, String, Vec<Declaration>),
+    StaticVar(VariableDeclArgs)
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -203,4 +205,21 @@ pub enum Type {
     Other(String),
     Tuple(Vec<Type>),
     Reference(Box<Type>)
+}
+
+impl Type {
+    pub fn is_primitive(&self) -> bool {
+        match self {
+            Type::Bool => true,
+            Type::Int => true,
+            Type::Float => true,
+            Type::Reference(inner_type) => {
+                match inner_type.deref() {
+                    Type::AutoArray(_) => false,
+                    _ => true
+                }
+            },
+            _ => false
+        }
+    }
 }

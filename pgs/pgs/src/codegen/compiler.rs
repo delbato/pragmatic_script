@@ -61,6 +61,9 @@ use std::{
     },
     ops::{
         Deref
+    },
+    collections::{
+        BTreeMap
     }
 };
 
@@ -79,8 +82,12 @@ pub enum CompilerError {
     UnknownVariable(String),
     UnknownModule(String),
     UnknownType(Type),
+    UnknownMember(String),
     UnsupportedExpression(Expression),
+    MemberAccessOnNonContainer,
     TypeMismatch(Type, Type),
+    CannotDerefNonPointer,
+    CannotDerefSlice,
     RegisterMapping
 }
 
@@ -355,11 +362,55 @@ impl Compiler {
 
     /// Resolves a container by name to a ContainerDef
     pub fn resolve_container(&self, name: &String) -> CompilerResult<ContainerDef> {
-        Err(CompilerError::Unimplemented(format!("Container resolving not implemented yet!")))
+        //println!("Resolving container by name {}", name);
+        if name.contains("::") {
+            let path_fragments: Vec<String> = name.split("::").map(|s| String::from(s)).collect();
+            let mut mod_ctx_opt = None;
+            let mut start_i = 0;
+            if path_fragments[0] == "root" {
+                start_i = 1;
+                mod_ctx_opt = Some(self.get_root_module()?);
+            } else if path_fragments[0] == "super" {
+                start_i = 1;
+                return Err(CompilerError::Unimplemented(format!("Blub")));
+            } else {
+                mod_ctx_opt = Some(self.get_current_module()?);
+            }
+
+            for i in start_i..path_fragments.len() - 1 {
+                let mod_ctx = mod_ctx_opt.unwrap();
+                //println!("Blub");
+                mod_ctx_opt = mod_ctx.modules.get(&path_fragments[i]);
+            }
+
+            let last_path = path_fragments.last().unwrap();
+
+            //println!("Resolving function {} for mod_ctx {}", last_path, mod_ctx_opt.as_ref().unwrap().name);
+
+            let mod_ctx = mod_ctx_opt.unwrap();
+            return mod_ctx.containers.get(last_path)
+                .cloned()
+                .ok_or(CompilerError::UnknownContainer(name.clone()));
+        } else {
+            let mod_ctx = self.get_current_module()?;
+            if mod_ctx.containers.contains_key(name) {
+                return mod_ctx.containers.get(name)
+                    .cloned()
+                    .ok_or(CompilerError::UnknownContainer(name.clone()));
+            }
+            if mod_ctx.imports.contains_key(name) {
+                let import_path = mod_ctx.imports.get(name)
+                    .ok_or(CompilerError::Unknown)?;
+                return self.resolve_container(import_path);
+            }
+
+            return Err(CompilerError::UnknownContainer(name.clone()));
+        }
     }
 
     /// Returns the byte size of a given Type
     pub fn get_size_of_type(&self, var_type: &Type) -> CompilerResult<usize> {
+        println!("Getting size of type");
         let size = match var_type {
             Type::String => 16,
             Type::Void => 0,
@@ -381,6 +432,7 @@ impl Compiler {
                 inner_type_size * size
             },
             _ => {
+                println!("Error in get_size_of_type()!");
                 return Err(CompilerError::UnknownType(var_type.clone()));
             }
         };
@@ -537,8 +589,14 @@ impl Compiler {
             Declaration::Function(_) => self.declare_fn_decl(decl)?,
             Declaration::Container(_) => self.declare_cont_decl(decl)?,
             Declaration::Import(_, _) => self.declare_import_decl(decl)?,
-            Declaration::Impl(_, _, _) => self.declare_impl_decl(decl)?
+            Declaration::Impl(_, _, _) => self.declare_impl_decl(decl)?,
+            Declaration::StaticVar(_) => self.declare_static_var(decl)?
         };
+        Ok(())
+    }
+
+    /// (Pre-)declares a given static var declaration
+    pub fn declare_static_var(&mut self, decl: &Declaration) -> CompilerResult<()> {
         Ok(())
     }
 
@@ -603,11 +661,19 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
-        let cont_def = ContainerDef::from(cont_decl_args);
+        //println!("Declaring cont: {:?}", cont_decl_args);
 
         let mod_ctx = self.get_current_module_mut()?;
+        if mod_ctx.containers.contains_key(&cont_decl_args.name) {
+            let cont_def = mod_ctx.containers.get_mut(&cont_decl_args.name)
+                .ok_or(CompilerError::UnknownContainer(cont_decl_args.name.clone()))?;
+            cont_def.merge_cont_decl(cont_decl_args);
+        } else {
+            let cont_def = ContainerDef::from(cont_decl_args);
+            mod_ctx.add_container(cont_def)?;
+        }
 
-        mod_ctx.add_container(cont_def)?;
+        //println!("Containers: {:?}", mod_ctx.containers);
 
         Ok(())
     }
@@ -886,6 +952,7 @@ impl Compiler {
             Statement::VariableDecl(var_decl_args) => var_decl_args,
             _ => return Err(CompilerError::Unknown)
         };
+        println!("Compiling var decl stmt");
         // The variable name
         let var_name = var_decl_args.name.clone();
         // The variable type
@@ -893,17 +960,22 @@ impl Compiler {
         // The assignment expression
         let assignment_expr = &var_decl_args.assignment;
         let assignment_expr_type = self.check_expr_type(&assignment_expr)?;
+        println!("var decl assign expr: {:?}", assignment_expr);
+        println!("var decl assign expr type: {:?}", assignment_expr_type);
         // Special handling for auto typed vars
         if var_type == Type::Auto {
             var_type = assignment_expr_type;
         }
+
+        println!("Var type: {:?}", var_type);
         // Byte size of this type
         let var_size = self.get_size_of_type(&var_type)?;
+        println!("Size of type: {}", var_size);
         // Compile said expression
         self.compile_expr(assignment_expr)?;
 
         // If the type can be contained in a register
-        if var_size <= 8 {
+        if var_type.is_primitive() {
             let last_reg = {
                 let fn_ctx = self.get_current_function()?;
                 fn_ctx.register_allocator.get_last_temp_register()?
@@ -935,7 +1007,10 @@ impl Compiler {
                         .with_operand::<u8>(Register::SP.into())
                         .with_operand::<i16>(var_sp_offset)
                 },
-                _ => return Err(CompilerError::UnknownType(var_type))
+                _ => {
+                    println!("Error in compile_var_decl_stmt()!");
+                    return Err(CompilerError::UnknownType(var_type));
+                }
             };
             let stack_inc_instr = Instruction::new_inc_stack(var_size);
             self.builder.push_instr(stack_inc_instr);
@@ -1383,15 +1458,15 @@ impl Compiler {
                 (lhs.deref().clone(), rhs_expr)
             },
             Expression::SubAssign(lhs, rhs) => {
-                let rhs_expr = Expression::Addition(lhs.clone(), rhs.clone());
+                let rhs_expr = Expression::Subtraction(lhs.clone(), rhs.clone());
                 (lhs.deref().clone(), rhs_expr)
             },
             Expression::DivAssign(lhs, rhs) => {
-                let rhs_expr = Expression::Addition(lhs.clone(), rhs.clone());
+                let rhs_expr = Expression::Division(lhs.clone(), rhs.clone());
                 (lhs.deref().clone(), rhs_expr)
             },
             Expression::MulAssign(lhs, rhs) => {
-                let rhs_expr = Expression::Addition(lhs.clone(), rhs.clone());
+                let rhs_expr = Expression::Multiplication(lhs.clone(), rhs.clone());
                 (lhs.deref().clone(), rhs_expr)
             },
             _ => return Err(CompilerError::Unknown)
@@ -1399,6 +1474,8 @@ impl Compiler {
 
         // Compile the left hand side of this expression
         let lhs_expr_type = self.compile_lhs_assign_expr(&lhs_expr)?;
+
+        println!("Type to be assigned to: {:?}", lhs_expr_type);
         // Get the result register
         let mut lhs_reg = {
             let fn_ctx = self.get_current_function_mut()?;
@@ -1407,17 +1484,20 @@ impl Compiler {
 
         // Save the result pointer to the stack;
         let stack_inc_instr = Instruction::new_inc_stack(8);
-        self.builder.push_instr(stack_inc_instr);
+        self.inc_stack(8)?;
+
         let save_stack_instr = Instruction::new(Opcode::MOVA_RA)
             .with_operand::<u8>(lhs_reg.into())
             .with_operand::<u8>(Register::SP.into())
             .with_operand::<i16>(-8);
+        
+        self.builder.push_instr(stack_inc_instr);
         self.builder.push_instr(save_stack_instr);
+
         let lhs_ptr_pos = {
             self.get_current_function()?
-                .stack_size
+                .stack_size - 8
         };
-        self.inc_stack(8)?;
 
         // Check the type of the rhs expression
         let rhs_expr_type = self.check_expr_type(&rhs_expr)?;
@@ -1427,23 +1507,22 @@ impl Compiler {
             return Err(CompilerError::TypeMismatch(lhs_expr_type, rhs_expr_type));
         }
 
+        let mut stack_size = self.get_stack_size()?;
+
+        println!("Stack size before assign expr: {}", stack_size);
+
         // Compile the right hand of this expression
         self.compile_expr(&rhs_expr)?;
+        stack_size = self.get_stack_size()?;
+        println!("Stack size after assign expr: {}", stack_size);
 
         // Last register used may contain the assignment value
-        let rhs_reg = {
-            let fn_ctx = self.get_current_function()?;
-            fn_ctx.register_allocator.get_last_temp_register()?
-        };
+        let rhs_reg = self.get_last_register()?;
 
-        lhs_reg = {
-            let fn_ctx = self.get_current_function_mut()?;
-            fn_ctx.register_allocator.get_temp_register()?
-        };
+        lhs_reg = self.get_next_register()?;
 
         let stack_offset: i16 = {
-            let curr_stack_size = self.get_current_function()?
-                .stack_size;
+            let curr_stack_size = self.get_stack_size()?;
             -((curr_stack_size - lhs_ptr_pos) as i16)
         };
 
@@ -1457,6 +1536,7 @@ impl Compiler {
         // Move the value to the assignment destination
         let assign_instr = match rhs_expr_type {
             Type::Int => {
+                println!("Moving value from {:?} to the address in {:?}", rhs_reg, lhs_reg);
                 Instruction::new(Opcode::MOVI_RA)
                     .with_operand::<u8>(rhs_reg.into())
                     .with_operand::<u8>(lhs_reg.into())
@@ -1525,13 +1605,114 @@ impl Compiler {
                 self.builder.push_instr(stack_offset_instr);
                 self.get_type_of_var(var_name)?
             },
+            Expression::MemberAccess(lhs_expr, rhs_expr) => {
+                let var_name = match lhs_expr.deref() {
+                    Expression::Variable(var_name) => var_name,
+                    _ => return Err(CompilerError::UnsupportedExpression(lhs_expr.deref().clone()))
+                };
+                let var_offset = self.get_sp_offset_of_var(var_name)?;
+                let var_type = self.get_type_of_var(var_name)?;
+                let lhs_ptr_reg = self.get_next_register()?;
+
+                let cont_def = match var_type {
+                    Type::Other(cont_name) => {
+                        let subui_instr = Instruction::new(Opcode::SUBU_I)
+                            .with_operand::<u8>(Register::SP.into())
+                            .with_operand::<u64>(var_offset.abs() as u64)
+                            .with_operand::<u8>(lhs_ptr_reg.into());
+                        self.builder.push_instr(subui_instr);
+                        self.resolve_container(&cont_name)?
+                    },
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::Other(cont_name) => {
+                                let mova_instr = Instruction::new(Opcode::MOVA_AR)
+                                    .with_operand::<u8>(Register::SP.into())
+                                    .with_operand::<i16>(var_offset as i16)
+                                    .with_operand::<u8>(lhs_ptr_reg.into());
+                                self.builder.push_instr(mova_instr);
+                                self.resolve_container(cont_name)?
+                            },
+                            _ => return Err(CompilerError::Unknown)
+                        }
+                    },
+                    _ => return Err(CompilerError::Unknown)
+                };
+
+                self.compile_lhs_assign_member_expr(rhs_expr, &cont_def)?
+            },
             _ => return Err(CompilerError::UnsupportedExpression(expr.clone()))
         };
         Ok(expr_type)
     }
 
+    pub fn compile_lhs_assign_member_expr(&mut self, rhs_expr: &Expression, cont_def: &ContainerDef) -> CompilerResult<Type> {
+        match rhs_expr {
+            Expression::Variable(var_name) => {
+                let last_reg = self.get_last_register()?;
+                let next_reg = self.get_next_register()?;
+
+                let member_offset = cont_def.get_member_offset(self, var_name)?;
+
+                let addui_instr = Instruction::new(Opcode::ADDU_I)
+                    .with_operand::<u8>(last_reg.into())
+                    .with_operand::<u64>(member_offset as u64)
+                    .with_operand::<u8>(next_reg.into());
+
+                
+                self.builder.push_instr(addui_instr);
+                cont_def.get_member_type(var_name)
+            },
+            Expression::MemberAccess(lhs_expr, rhs_expr) => {
+                let var_name;
+                if let Expression::Variable(name) = lhs_expr.deref() {
+                    var_name = name;
+                } else {
+                    return Err(CompilerError::UnsupportedExpression(lhs_expr.deref().clone()));
+                }
+
+                let member_offset = cont_def.get_member_offset(self, var_name)?;
+                let member_type = cont_def.get_member_type(var_name)?;
+
+                let last_reg = self.get_last_register()?;
+                let next_reg = self.get_next_register()?;
+
+                let cont_def = match member_type {
+                    Type::Other(cont_name) => {
+                        let addui_instr = Instruction::new(Opcode::ADDU_I)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<u64>(member_offset as u64)
+                            .with_operand::<u8>(next_reg.into());
+                        self.builder.push_instr(addui_instr);
+                        self.resolve_container(&cont_name)?
+                    },
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::Other(cont_name) => {
+                                let mova_instr = Instruction::new(Opcode::MOVA_AR)
+                                    .with_operand::<u8>(last_reg.into())
+                                    .with_operand::<i16>(member_offset as i16)
+                                    .with_operand::<u8>(next_reg.into());
+                                self.builder.push_instr(mova_instr);
+                                self.resolve_container(cont_name)?
+                            },
+                            _ => return Err(CompilerError::Unknown)
+                        }
+                    },
+                    _ => return Err(CompilerError::Unknown)
+                };
+
+                self.compile_lhs_assign_member_expr(rhs_expr, &cont_def)
+            },
+            _ => return Err(CompilerError::UnsupportedExpression(rhs_expr.deref().clone()))
+        }
+    }
+
     /// Compiles an expression
     pub fn compile_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        let expr_type = self.check_expr_type(expr)?;
+        let expr_size = self.get_size_of_type(&expr_type)?;
+        let before_stack_size = self.get_stack_size()?;
         match expr {
             Expression::IntLiteral(int) => {
                 let reg = {
@@ -1599,8 +1780,52 @@ impl Compiler {
                 self.builder.push_instr(mov_size_instr);
                 self.builder.push_instr(mov_addr_instr);
             },
+            Expression::ContainerInstance(_, _) => {
+                self.compile_cont_instance_expr(expr)?;
+            },
             Expression::Variable(_) => {
                 self.compile_var_expr(expr)?;
+            },
+            Expression::MemberAccess(_, _) => {
+                let expr_type = self.check_expr_type(expr)?;
+                self.compile_member_access_expr(expr, None)?;
+                // Register that contains the destination address for reading this value
+                let last_reg = self.get_last_register()?;
+                match &expr_type {
+                    Type::Int => {
+                        let next_reg = self.get_next_register()?;
+                        println!("Saving member access return value int into {:?}", next_reg);
+                        let movi_instr = Instruction::new(Opcode::MOVI_AR)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<i16>(0)
+                            .with_operand::<u8>(next_reg.into());
+                        self.builder.push_instr(movi_instr);
+                    },
+                    Type::Float => {
+                        let next_reg = self.get_next_register()?;
+                        println!("Saving member access return value int into {:?}", next_reg);
+                        let movf_instr = Instruction::new(Opcode::MOVF_AR)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<i16>(0)
+                            .with_operand::<u8>(next_reg.into());
+                        self.builder.push_instr(movf_instr);
+                    },
+                    Type::Bool => {
+                        
+                    },
+                    Type::String => {
+
+                    },
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::AutoArray(_) => {},
+                            _ => {}
+                        }
+                    },
+                    _ => {
+
+                    }
+                };
             },
             Expression::Call(_, _) => {
                 self.compile_call_expr(expr)?;
@@ -1620,12 +1845,14 @@ impl Compiler {
                     let fn_ctx = self.get_current_function()?;
                     fn_ctx.register_allocator.get_last_temp_register()?
                 };
+                println!("Adding registers {:?} and {:?}", lhs_reg, rhs_reg);
                 match expr_type {
                     Type::Int => {
                         let res_reg = {
                             let fn_ctx = self.get_current_function_mut()?;
                             fn_ctx.register_allocator.get_temp_register()?
                         };
+                        println!("Saved result into {:?}", res_reg);
                         let addi_instr = Instruction::new(Opcode::ADDI)
                             .with_operand::<u8>(lhs_reg.into())
                             .with_operand::<u8>(rhs_reg.into())
@@ -2031,8 +2258,252 @@ impl Compiler {
             },
             _ => return Err(CompilerError::UnsupportedExpression(expr.clone()))
         };
+
+        let after_stack_size = self.get_stack_size()?;
+        let stack_diff = after_stack_size - before_stack_size;
+
+        if stack_diff > 0 {
+            // Handle stack cleanup
+            let mut pop_size = stack_diff;
+            match expr_type {
+                Type::Int => {},
+                Type::Float => {},
+                Type::Bool => {},
+                Type::Reference(inner_type) => {
+                    match inner_type.deref() {
+                        Type::AutoArray(_) => {
+                            let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                                .with_operand::<u8>(Register::SP.into())
+                                .with_operand::<i16>(-(expr_size as i16))
+                                .with_operand::<u8>(Register::SP.into())
+                                .with_operand::<i16>(-(stack_diff as i16))
+                                .with_operand::<u32>(16);
+                            pop_size -= expr_size;
+                            self.builder.push_instr(mov_stack_instr);
+                        },
+                        _ => {}
+                    };
+                },
+                _ => {
+                    let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(expr_size as i16))
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(stack_diff as i16))
+                        .with_operand::<u32>(expr_size as u32);
+                    pop_size -= expr_size;
+                    self.builder.push_instr(mov_stack_instr);
+                },
+            };
+
+            let pop_stack_instr = Instruction::new_dec_stack(pop_size);
+            self.dec_stack(pop_size)?;
+            self.builder.push_instr(pop_stack_instr);
+        }
+
         Ok(())
         //Err(CompilerError::Unimplemented(format!("Expr compilation not implemented!")))
+    }
+
+    /// Compiles a member access expression
+    pub fn compile_member_access_expr(&mut self, expr: &Expression, cont_def: Option<&ContainerDef>) -> CompilerResult<()> {
+        let (lhs_expr, rhs_expr) = match expr {
+            Expression::MemberAccess(lhs, rhs) => (lhs.deref(), rhs.deref()),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let last_reg = self.get_last_register()?;
+        let lhs_reg = self.get_next_register()?;
+
+        let var_type = match lhs_expr {
+            Expression::Variable(var_name) => {
+                // If variable is on stack
+                if cont_def.is_none() {
+                    let var_offset = self.get_sp_offset_of_var(var_name)?;
+                    let var_type = self.get_type_of_var(var_name)?;
+                    match &var_type {
+                        Type::Other(cont_name) => {
+                            let subui_instr = Instruction::new(Opcode::SUBU_I)
+                                .with_operand::<u8>(Register::SP.into())
+                                .with_operand::<u64>(var_offset.abs() as u64)
+                                .with_operand::<u8>(lhs_reg.clone().into());
+                            self.builder.push_instr(subui_instr);
+                        },
+                        Type::Reference(inner_type) => {
+                            match inner_type.deref() {
+                                Type::Other(cont_name) => {
+                                    let mova_instr = Instruction::new(Opcode::MOVA_AR)
+                                        .with_operand::<u8>(Register::SP.into())
+                                        .with_operand::<u64>(var_offset.abs() as u64)
+                                        .with_operand::<u8>(lhs_reg.clone().into());
+                                    self.builder.push_instr(mova_instr);
+                                },
+                                _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                            };
+                        },
+                        _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                    };
+                    var_type
+                }
+                // If variable is a member
+                else {
+                    let cont_def = cont_def.unwrap();
+                    let member_offset = cont_def.get_member_offset(self, var_name)?;
+                    let member_type = cont_def.get_member_type(var_name)?;
+                    match &member_type {
+                        Type::Reference(inner_type) => {
+                            match inner_type.deref() {
+                                _ => {
+                                    let mova_instr = Instruction::new(Opcode::MOVA_AR)
+                                        .with_operand::<u8>(last_reg.into())
+                                        .with_operand::<i16>(member_offset as i16)
+                                        .with_operand::<u8>(lhs_reg.clone().into());
+                                    self.builder.push_instr(mova_instr);
+                                }
+                            };
+                        },
+                        _ => {
+                            let addui_instr = Instruction::new(Opcode::ADDU_I)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<u64>(member_offset as u64)
+                                .with_operand::<u8>(lhs_reg.clone().into());
+                            self.builder.push_instr(addui_instr);
+                        }
+                    };
+                    member_type
+                }
+            },
+            _ => return Err(CompilerError::UnsupportedExpression(lhs_expr.deref().clone()))
+        };
+
+        let cont_name = match &var_type {
+            Type::Other(cont_name) => cont_name,
+            Type::Reference(inner_type) => {
+                match inner_type.deref() {
+                    Type::Other(cont_name) => cont_name,
+                    _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                }
+            },
+            _ => return Err(CompilerError::MemberAccessOnNonContainer)
+        };
+        let cont_def = self.resolve_container(cont_name)?;
+        let rhs_reg = self.get_next_register()?;
+
+        match rhs_expr {
+            Expression::Variable(member_name) => {
+                let member_offset = cont_def.get_member_offset(self, member_name)?;
+                let addui_instr = Instruction::new(Opcode::ADDU_I)
+                    .with_operand::<u8>(lhs_reg.into())
+                    .with_operand::<u64>(member_offset as u64)
+                    .with_operand::<u8>(rhs_reg.into());
+                self.builder.push_instr(addui_instr);
+            },
+            Expression::MemberAccess(member_expr, _) => {
+                let member_name = match member_expr.deref() {
+                    Expression::Variable(var_name) => var_name,
+                    _ => return Err(CompilerError::UnsupportedExpression(member_expr.deref().clone()))
+                };
+                let member_type = cont_def.get_member_type(member_name)?;
+                let cont_name = match &member_type {
+                    Type::Other(cont_name) => cont_name,
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::Other(cont_name) => cont_name,
+                            _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                        }
+                    },
+                    _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                };
+                let inner_cont_def = self.resolve_container(cont_name)?;
+                let mova_instr = Instruction::new(Opcode::MOVA)
+                    .with_operand::<u8>(lhs_reg.into())
+                    .with_operand::<u8>(rhs_reg.into());
+                self.builder.push_instr(mova_instr);
+                self.compile_member_access_expr(rhs_expr, Some(&inner_cont_def))?;
+            },
+            _ => return Err(CompilerError::UnsupportedExpression(rhs_expr.clone()))
+        };
+
+        Ok(())
+    }
+
+    /// Compiles a cont instance expression
+    pub fn compile_cont_instance_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        let (cont_name, cont_memper_map) = match expr {
+            Expression::ContainerInstance(a1, a2) => (a1, a2),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        // Sorts the member instance expressions in the correct way
+        let mut member_map_ordered = BTreeMap::new();
+
+        // Resolve the container definition
+        let cont_def = self.resolve_container(cont_name)?;
+
+        // Insert the expressions at the correct position
+        for (name, expr) in cont_memper_map.iter() {
+            // Retrieve position from container def
+            let index = cont_def.get_member_index(name)?;
+            member_map_ordered.insert(index, expr);
+        }
+
+        // Finally, compile the expressions in the correct order
+        for (_, expr) in member_map_ordered.iter() {
+            let expr_type = self.check_expr_type(expr)?;
+            self.compile_expr(expr)?;
+            // Special handling for copying register type values on the stack
+            let last_reg = self.get_last_register()?;
+            match expr_type {
+                Type::Int => {
+                    let stack_inc_instr = Instruction::new_inc_stack(8);
+                    self.inc_stack(8)?;
+                    let movi_instr = Instruction::new(Opcode::MOVI_RA)
+                        .with_operand::<u8>(last_reg.clone().into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-8);
+                    self.builder.push_instr(stack_inc_instr);
+                    self.builder.push_instr(movi_instr);
+                },
+                Type::Bool => {
+                    let stack_inc_instr = Instruction::new_inc_stack(1);
+                    self.inc_stack(1)?;
+                    let movb_instr = Instruction::new(Opcode::MOVB_RA)
+                        .with_operand::<u8>(last_reg.clone().into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-1);
+                    self.builder.push_instr(stack_inc_instr);
+                    self.builder.push_instr(movb_instr);
+                },
+                Type::Float => {
+                    let stack_inc_instr = Instruction::new_inc_stack(4);
+                    self.inc_stack(4)?;
+                    let movf_instr = Instruction::new(Opcode::MOVF_RA)
+                        .with_operand::<u8>(last_reg.clone().into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-4);
+                    self.builder.push_instr(stack_inc_instr);
+                    self.builder.push_instr(movf_instr);
+                },
+                Type::Reference(inner_type) => {
+                    match inner_type.deref() {
+                        Type::AutoArray(_) => {},
+                        _ => {
+                            let stack_inc_instr = Instruction::new_inc_stack(8);
+                            self.inc_stack(8)?;
+                            let mova_instr = Instruction::new(Opcode::MOVA_RA)
+                                .with_operand::<u8>(last_reg.clone().into())
+                                .with_operand::<u8>(Register::SP.into())
+                                .with_operand::<i16>(-8);
+                            self.builder.push_instr(stack_inc_instr);
+                            self.builder.push_instr(mova_instr);
+                        }
+                    };
+                },
+                _ => {}
+            };
+        }
+
+        Ok(())
     }
 
     /// Compiles a call expresion
@@ -2041,6 +2512,8 @@ impl Compiler {
             Expression::Call(fn_name, fn_args) => (fn_name, fn_args),
             _ => return Err(CompilerError::Unknown)
         };
+
+        println!("Compiling call expr");
 
         let fn_def = self.resolve_function(fn_name)?;
 
@@ -2100,19 +2573,22 @@ impl Compiler {
                         .with_operand::<i16>(-(size as i16)))
                 },
                 Type::Float => {
-                    Some(Instruction::new(Opcode::MOVI_RA)
+                    Some(Instruction::new(Opcode::MOVF_RA)
                         .with_operand::<u8>(last_reg.into())
                         .with_operand::<u8>(Register::SP.into())
                         .with_operand::<i16>(-(size as i16)))
                 },
                 Type::Bool => {
-                    Some(Instruction::new(Opcode::MOVI_RA)
+                    Some(Instruction::new(Opcode::MOVB_RA)
                         .with_operand::<u8>(last_reg.into())
                         .with_operand::<u8>(Register::SP.into())
                         .with_operand::<i16>(-(size as i16)))
                 },
                 Type::String => None,
-                _ => return Err(CompilerError::UnknownType(expr_type))
+                _ => {
+                    println!("Error in compile_call_expr()!");
+                    return Err(CompilerError::UnknownType(expr_type));
+                }
             };
 
             if mov_instr_opt.is_some() {
@@ -2151,8 +2627,10 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
+        println!("Compiling var expr");
+
         let var_type = self.get_type_of_var(var_name)?;
-        let var_offset = self.get_sp_offset_of_var(var_name)?;
+        let mut var_offset = self.get_sp_offset_of_var(var_name)?;
         match var_type {
             Type::Int => {
                 let reg = {
@@ -2192,7 +2670,7 @@ impl Compiler {
                     Type::AutoArray(_) => {
                         let stack_inc_instr = Instruction::new_inc_stack(16);
                         self.inc_stack(16)?;
-                        let var_offset = self.get_sp_offset_of_var(var_name)?;
+                        var_offset -= 16;
                         let movn_instr = Instruction::new(Opcode::MOVN_A)
                             .with_operand::<u8>(Register::SP.into())
                             .with_operand::<i16>(var_offset as i16)
@@ -2216,9 +2694,28 @@ impl Compiler {
                 };
             },
             Type::Other(cont_name) => {
-                return Err(CompilerError::Unimplemented(format!("Containers not implemented yet!")))
+                let cont_def = self.resolve_container(&cont_name)?;
+                let size = cont_def.get_size(self)?;
+
+                let stack_inc_instr = Instruction::new_inc_stack(size);
+                self.inc_stack(size)?;
+
+                var_offset -= size as i64;
+
+                let movn_instr = Instruction::new(Opcode::MOVN_A)
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(var_offset as i16)
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-(size as i16))
+                    .with_operand::<u32>(size as u32);
+                
+                self.builder.push_instr(stack_inc_instr);
+                self.builder.push_instr(movn_instr);
             },
-            _ => return Err(CompilerError::UnknownType(var_type)),
+            _ => {
+                println!("Errors in compile_var_expr()");
+                return Err(CompilerError::UnknownType(var_type));
+            },
         };
 
         Ok(())
@@ -2232,8 +2729,34 @@ impl Compiler {
             Expression::FloatLiteral(_) => Type::Float,
             Expression::BoolLiteral(_) => Type::Bool,
             Expression::StringLiteral(_) => Type::String,
+            Expression::Ref(expr) => {
+                let expr_type = self.check_expr_type(expr)?;
+                Type::Reference(Box::new(expr_type))
+            },
+            Expression::Deref(expr) => {
+                let expr_type = self.check_expr_type(expr)?;
+                match expr_type {
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::AutoArray(_) => return Err(CompilerError::CannotDerefSlice),
+                            _ => return Ok(inner_type.deref().clone())
+                        };
+                    },
+                    _ => return Err(CompilerError::CannotDerefNonPointer)
+                };
+            },
+            Expression::Call(fn_name, _) => {
+                let fn_def = self.resolve_function(fn_name)?;
+                fn_def.ret_type
+            },
             Expression::Variable(var_name) => {
                 self.get_type_of_var(var_name)?
+            },
+            Expression::MemberAccess(_, _) => {
+                self.check_member_access_expr_type(expr, None)?
+            },
+            Expression::ContainerInstance(cont_name, _) => {
+                Type::Other(cont_name.clone())
             },
             Expression::Assign(lhs, rhs) => {
                 let lhs_type = self.check_expr_type(lhs)?;
@@ -2350,6 +2873,67 @@ impl Compiler {
         };
         Ok(expr_type)
         //Err(CompilerError::Unimplemented(format!("Expr type checking not implemented!")))
+    }
+
+    pub fn check_member_access_expr_type(&self, expr: &Expression, cont_def: Option<&ContainerDef>) -> CompilerResult<Type> {
+        let (lhs_expr, rhs_expr) = match expr {
+            Expression::MemberAccess(lhs, rhs) => (lhs.deref(), rhs.deref()),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        let lhs_type = match lhs_expr {
+            Expression::Variable(var_name) => {
+                // If this is a stack variable
+                if cont_def.is_none() {
+                    self.get_type_of_var(var_name)?
+                }
+                // If this is a member
+                else {
+                    let cont_def = cont_def.unwrap();
+                    cont_def.get_member_type(var_name)?
+                }
+            },
+            _ => return Err(CompilerError::UnsupportedExpression(lhs_expr.clone()))
+        };
+
+        let cont_name = match &lhs_type {
+            Type::Other(cont_name) => cont_name,
+            Type::Reference(inner_type) => {
+                match inner_type.deref() {
+                    Type::Other(cont_name) => cont_name,
+                    _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                }
+            },
+            _ => return Err(CompilerError::MemberAccessOnNonContainer)
+        };
+
+        let cont_def = self.resolve_container(cont_name)?;
+
+        match &rhs_expr {
+            Expression::Variable(var_name) => {
+                cont_def.get_member_type(var_name)
+            },
+            Expression::MemberAccess(member_expr, _) => {
+                let member_name = match member_expr.deref() {
+                    Expression::Variable(var_name) => var_name,
+                    _ => return Err(CompilerError::UnsupportedExpression(member_expr.deref().clone()))
+                };
+                let member_type = cont_def.get_member_type(member_name)?;
+                let child_cont_name = match &member_type {
+                    Type::Other(cont_name) => cont_name,
+                    Type::Reference(inner_type) => {
+                        match inner_type.deref() {
+                            Type::Other(cont_name) => cont_name,
+                            _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                        }
+                    },
+                    _ => return Err(CompilerError::MemberAccessOnNonContainer)
+                };
+                let child_cont_def = self.resolve_container(child_cont_name)?;
+                self.check_member_access_expr_type(rhs_expr, Some(&child_cont_def))
+            },
+            _ => return Err(CompilerError::MemberAccessOnNonContainer)
+        }
     }
 
     // #endregion

@@ -623,7 +623,7 @@ fn test_parse_cont_impl() {
             y: float;
         }
         impl: Vector {
-            fn: len(&self) ~ float {
+            fn: len(&this) ~ float {
                 return 1.0;
             }
         }
@@ -637,5 +637,36 @@ fn test_parse_cont_impl() {
 
     for decl in decl_list_res.unwrap() {
         println!("{:?}", decl);
+    }
+}
+
+#[test]
+fn test_parse_cont_instance() {
+    let code = String::from("
+        cont: Test {
+            x: string;
+            y: string;
+        }
+        
+        fn: main() {
+            var test = Test {
+                x: \"Hello,\",
+                y: \" world!\"
+            };
+        }
+    ");
+
+    let parser = Parser::new(code.clone());
+
+    let decl_list_res = parser.parse_root_decl_list();
+    println!("{:?}", decl_list_res);
+    assert!(decl_list_res.is_ok());
+
+    for decl in decl_list_res.unwrap() {
+        if let Declaration::Function(fn_decl_args) = decl {
+            for stmt in fn_decl_args.code_block.iter() {
+                println!("{:?}", stmt);
+            }
+        }
     }
 }
