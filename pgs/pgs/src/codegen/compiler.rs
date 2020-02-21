@@ -60,7 +60,8 @@ use std::{
         HashSet
     },
     ops::{
-        Deref
+        Deref,
+        DerefMut
     },
     collections::{
         BTreeMap
@@ -84,6 +85,11 @@ pub enum CompilerError {
     UnknownType(Type),
     UnknownMember(String),
     UnsupportedExpression(Expression),
+    InvalidModulePath(String),
+    AlreadyContainsContainer(String),
+    AlreadyContainsModule(String),
+    NotAMemberFunction(String),
+    ArgumentMismatch(String),
     MemberAccessOnNonContainer,
     TypeMismatch(Type, Type),
     CannotDerefNonPointer,
@@ -315,9 +321,11 @@ impl Compiler {
 
     /// Resolves a function by name to a FunctionDef
     pub fn resolve_function(&self, name: &String) -> CompilerResult<FunctionDef> {
+        //println!("Resolving function: {}", name);
         if name.contains("::") {
             let path_fragments: Vec<String> = name.split("::").map(|s| String::from(s)).collect();
             let mut mod_ctx_opt = None;
+            let mut cont_def_opt = None;
             let mut start_i = 0;
             if path_fragments[0] == "root" {
                 start_i = 1;
@@ -331,6 +339,16 @@ impl Compiler {
 
             for i in start_i..path_fragments.len() - 1 {
                 let mod_ctx = mod_ctx_opt.unwrap();
+                if mod_ctx.containers.contains_key(&path_fragments[i]) {
+                    //println!("Function is in container {}", &path_fragments[i]);
+                    if i != path_fragments.len() - 2 {
+                        //println!("i: {}, len: {}", i, path_fragments.len());
+                        //println!("{:?}", path_fragments);
+                        return Err(CompilerError::InvalidModulePath(name.clone()));
+                    }
+                    cont_def_opt = Some(mod_ctx.get_container(&path_fragments[i])?);
+                    break;
+                }
                 //println!("Blub");
                 mod_ctx_opt = mod_ctx.modules.get(&path_fragments[i]);
             }
@@ -338,17 +356,26 @@ impl Compiler {
             let last_path = path_fragments.last().unwrap();
 
             //println!("Resolving function {} for mod_ctx {}", last_path, mod_ctx_opt.as_ref().unwrap().name);
-
-            let mod_ctx = mod_ctx_opt.unwrap();
-            return mod_ctx.functions.get(last_path)
-                .cloned()
-                .ok_or(CompilerError::UnknownFunction(name.clone()));
+            if cont_def_opt.is_some() {
+                let cont_def = cont_def_opt.unwrap();
+                return Ok(
+                    cont_def.get_member_function(last_path)?
+                        .clone()
+                )
+            } else {
+                //println!("Resolved {}. Was in module!", name);
+                let mod_ctx = mod_ctx_opt.unwrap();
+                //println!("Blub");
+                return mod_ctx.functions.get(last_path)
+                    .cloned()
+                    .ok_or(CompilerError::UnknownFunction(name.clone()));
+            }
         } else {
             let mod_ctx = self.get_current_module()?;
             if mod_ctx.functions.contains_key(name) {
                 return mod_ctx.functions.get(name)
                     .cloned()
-                    .ok_or(CompilerError::Unknown);
+                    .ok_or(CompilerError::UnknownFunction(name.clone()));
             }
             if mod_ctx.imports.contains_key(name) {
                 let import_path = mod_ctx.imports.get(name)
@@ -410,7 +437,7 @@ impl Compiler {
 
     /// Returns the byte size of a given Type
     pub fn get_size_of_type(&self, var_type: &Type) -> CompilerResult<usize> {
-        println!("Getting size of type");
+        //println!("Getting size of type");
         let size = match var_type {
             Type::String => 16,
             Type::Void => 0,
@@ -432,7 +459,7 @@ impl Compiler {
                 inner_type_size * size
             },
             _ => {
-                println!("Error in get_size_of_type()!");
+                //println!("Error in get_size_of_type()!");
                 return Err(CompilerError::UnknownType(var_type.clone()));
             }
         };
@@ -473,6 +500,7 @@ impl Compiler {
     pub fn inc_stack(&mut self, size: usize) -> CompilerResult<usize> {
         let fn_ctx = self.get_current_function_mut()?;
         fn_ctx.stack_size += size;
+        //println!("COMP: Incrementing stack by {}", size);
         //println!("Incrementing stack of {:?} by {}", fn_ctx, size);
         Ok(fn_ctx.stack_size)
     }
@@ -481,6 +509,7 @@ impl Compiler {
     pub fn dec_stack(&mut self, size: usize) -> CompilerResult<usize> {
         let fn_ctx = self.get_current_function_mut()?;
         fn_ctx.stack_size -= size;
+        //println!("COMP: Decrementing stack by {}", size);
         Ok(fn_ctx.stack_size)
     }
 
@@ -570,6 +599,30 @@ impl Compiler {
         Ok(())
     }
 
+    /// Canonizes (adds module path when necessary) a given Type
+    pub fn canonize_type(&self, var_type: &mut Type) -> CompilerResult<()> {
+        let new_type_opt = match var_type {
+            Type::Reference(inner_type) => {
+                let inner_type = inner_type.deref_mut();
+                self.canonize_type(inner_type)?;
+                Some(
+                    Type::Reference(Box::new(inner_type.clone()))
+                )
+            },
+            Type::Other(cont_name) => {
+                let cont_def = self.resolve_container(cont_name)?;
+                Some(
+                    Type::Other(cont_def.canonical_name.clone())
+                )
+            },
+            _ => None
+        };
+        if new_type_opt.is_some() {
+            *var_type = new_type_opt.unwrap();
+        }
+        Ok(())
+    }
+
     // #endregion
 
     // #region declare functions
@@ -617,12 +670,16 @@ impl Compiler {
         let uid = self.uid_generator.get_function_uid(&full_fn_name);
         self.fn_uid_map.insert(full_fn_name.clone(), uid.clone());
 
-        let fn_def = FunctionDef::from(fn_decl_args)
+        let mut fn_def = FunctionDef::from(fn_decl_args)
             .with_uid(uid);
+
+        for (arg_name, arg_type) in fn_def.arguments.iter_mut() {
+            self.canonize_type(arg_type)?;
+        }
 
         if let Some(cont_name) = self.current_cont.as_ref().cloned() {
             let mod_ctx = self.get_current_module_mut()?;
-            let cont_def = mod_ctx.get_container(&cont_name)?;
+            let cont_def = mod_ctx.get_container_mut(&cont_name)?;
             cont_def.add_member_function(fn_def)?;
         } else {
             let mod_ctx = self.get_current_module_mut()?;
@@ -649,6 +706,10 @@ impl Compiler {
 
         let front_mod_ctx = self.get_current_module_mut()?;
 
+        if front_mod_ctx.containers.contains_key(mod_name) {
+            return Err(CompilerError::AlreadyContainsContainer(mod_name.clone()));
+        }
+
         front_mod_ctx.add_module(mod_ctx)?;
 
         Ok(())
@@ -662,14 +723,18 @@ impl Compiler {
         };
 
         //println!("Declaring cont: {:?}", cont_decl_args);
-
+        let mut canon_name = self.get_module_path();
+        canon_name += &cont_decl_args.name;
         let mod_ctx = self.get_current_module_mut()?;
         if mod_ctx.containers.contains_key(&cont_decl_args.name) {
             let cont_def = mod_ctx.containers.get_mut(&cont_decl_args.name)
                 .ok_or(CompilerError::UnknownContainer(cont_decl_args.name.clone()))?;
             cont_def.merge_cont_decl(cont_decl_args);
         } else {
-            let cont_def = ContainerDef::from(cont_decl_args);
+            let cont_def = ContainerDef::from_decl(cont_decl_args, canon_name);
+            if mod_ctx.modules.contains_key(&cont_decl_args.name) {
+                return Err(CompilerError::AlreadyContainsModule(cont_decl_args.name.clone()));
+            }
             mod_ctx.add_container(cont_def)?;
         }
 
@@ -698,11 +763,14 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
+        let mut canonical_name = self.get_module_path();
+        canonical_name += &impl_type;
+
         if impl_type == impl_for {
             let mod_ctx = self.get_current_module_mut()?;
             let cont_res = mod_ctx.get_container(impl_type);
             if cont_res.is_err() {
-                let cont_def = ContainerDef::new(impl_type.clone());
+                let cont_def = ContainerDef::new(impl_type.clone(), canonical_name);
                 mod_ctx.add_container(cont_def)?;
             }
             self.current_cont = Some(impl_type.clone());
@@ -752,20 +820,37 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
+        //println!("Compiling fn_decl");
+
         let fn_def = {
-            self.get_current_module()?
-                .get_function(&fn_decl_args.name)?
-                .clone()
+            if self.current_cont.is_none() {
+                self.get_current_module()?
+                    .get_function(&fn_decl_args.name)?
+                    .clone()
+            } else {
+                let cont_name = self.current_cont.as_ref().unwrap();
+                let cont_def = self.resolve_container(cont_name)?;
+                cont_def.get_member_function(&fn_decl_args.name)?
+                    .clone()
+            }
         };
+
+        //println!("Fn def: {:?}", fn_def);
 
         let fn_ret_type = fn_def.ret_type.clone();
 
         let mut fn_ctx = FunctionContext::new(self, fn_def)?;
 
         let mut full_fn_name = self.get_module_path();
+        if self.current_cont.is_some() {
+            full_fn_name += self.current_cont.as_ref().unwrap();
+            full_fn_name += "::";
+        }
         full_fn_name += &fn_decl_args.name;
 
+        //println!("Compiling fn decl with label {}", full_fn_name);
 
+        
         self.builder.push_label(full_fn_name);
 
         self.push_function_context(fn_ctx);
@@ -818,11 +903,10 @@ impl Compiler {
         //println!("Compiling stack cleanup with stack size {}", pop_size);
 
         // Instruction for popping values off the stack
-        let pop_stack_instr = Instruction::new(Opcode::SUBU_I)
-            .with_operand::<u8>(Register::SP.into())
-            .with_operand::<u64>(pop_size as u64)
-            .with_operand::<u8>(Register::SP.into());
-        self.builder.push_instr(pop_stack_instr);
+        if pop_size > 0 {
+            let pop_stack_instr = Instruction::new_dec_stack(pop_size);
+            self.builder.push_instr(pop_stack_instr);
+        }
 
         Ok(())
     }
@@ -845,32 +929,11 @@ impl Compiler {
         let ret_size = self.get_size_of_type(&ret_type)?;
         let mut pop_size = stack_size;
         let stack_begin_offset = -(stack_size as i16);
-
-        match ret_type {
-            Type::Bool => {},
-            Type::Int => {},
-            Type::Reference(inner) => {
-                match inner.deref() {
-                    Type::AutoArray(_) => {
-                        pop_size -= 16;
-                        // Instruction for saving the return value
-                        let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
-                            .with_operand::<u8>(Register::SP.into())
-                            .with_operand::<i16>(-16)
-                            .with_operand::<u8>(Register::SP.into())
-                            .with_operand::<i16>(stack_begin_offset)
-                            .with_operand::<u32>(16);
-                        self.builder.push_instr(mov_stack_instr);
-                    },
-                    _ => {}
-                };
-            },
-            Type::Float => {},
-            Type::Void => {},
-            _ => {
-                pop_size -= ret_size;
-
-                // Instruction for saving the return value
+        
+        if !ret_type.is_primitive() {
+            //println!("fn return type is non-primitive.");
+            pop_size -= ret_size;
+            if pop_size > 0 {
                 let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
                     .with_operand::<u8>(Register::SP.into())
                     .with_operand::<i16>(-(ret_size as i16))
@@ -879,14 +942,14 @@ impl Compiler {
                     .with_operand::<u32>(ret_size as u32);
                 self.builder.push_instr(mov_stack_instr);
             }
-        };
+        }
 
-        // Instruction for popping values off the stack
-        let pop_stack_instr = Instruction::new(Opcode::SUBU_I)
-            .with_operand::<u8>(Register::SP.into())
-            .with_operand::<u64>(pop_size as u64)
-            .with_operand::<u8>(Register::SP.into());
-        self.builder.push_instr(pop_stack_instr);
+        if pop_size > 0 {
+            //println!("Popping {} off the stack at return.", pop_size);
+            let pop_stack_instr = Instruction::new_dec_stack(pop_size);
+            self.dec_stack(pop_size)?;
+            self.builder.push_instr(pop_stack_instr);
+        }
 
         Ok(())
     }
@@ -920,13 +983,30 @@ impl Compiler {
 
     /// Compiles an impl declaration
     pub fn compile_impl_decl(&mut self, decl: &Declaration) -> CompilerResult<()> {
+        let (impl_type, impl_for, decl_list) = match decl {
+            Declaration::Impl(impl_type, impl_for, decl_list) => (impl_type, impl_for, decl_list), 
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        //println!("Compiling impl: {:?}", decl);
+
+        if impl_type == impl_for {
+            self.current_cont = Some(impl_type.clone());
+            self.compile_decl_list(decl_list)?;
+            self.current_cont = None;
+        } else {
+            return Err(CompilerError::Unimplemented(format!("impl of interfaces not supported yet!")));
+        }
+
         Ok(())
     }
 
     /// Compiles a statement list
     pub fn compile_stmt_list(&mut self, stmt_list: &[Statement]) -> CompilerResult<()> {
         for stmt in stmt_list.iter() {
+            //println!("Compiling statement... Stack size: {}", self.get_stack_size()?);
             self.compile_stmt(stmt)?;
+            //println!("Compiled statement... Stack size: {}", self.get_stack_size()?);
         }
         Ok(())
     }
@@ -952,7 +1032,7 @@ impl Compiler {
             Statement::VariableDecl(var_decl_args) => var_decl_args,
             _ => return Err(CompilerError::Unknown)
         };
-        println!("Compiling var decl stmt");
+        //println!("Compiling var decl stmt");
         // The variable name
         let var_name = var_decl_args.name.clone();
         // The variable type
@@ -960,19 +1040,21 @@ impl Compiler {
         // The assignment expression
         let assignment_expr = &var_decl_args.assignment;
         let assignment_expr_type = self.check_expr_type(&assignment_expr)?;
-        println!("var decl assign expr: {:?}", assignment_expr);
-        println!("var decl assign expr type: {:?}", assignment_expr_type);
+        //println!("var decl assign expr: {:?}", assignment_expr);
+        //println!("var decl assign expr type: {:?}", assignment_expr_type);
         // Special handling for auto typed vars
         if var_type == Type::Auto {
             var_type = assignment_expr_type;
         }
 
-        println!("Var type: {:?}", var_type);
+        //println!("Var type: {:?}", var_type);
         // Byte size of this type
         let var_size = self.get_size_of_type(&var_type)?;
-        println!("Size of type: {}", var_size);
+        //println!("Size of type: {}", var_size);
         // Compile said expression
+        //println!("Compiling assignment expr ({:?}). SP: {}", assignment_expr, self.get_stack_size()?);
         self.compile_expr(assignment_expr)?;
+        //println!("Compiled assignment expr ({:?}). SP: {}", assignment_expr, self.get_stack_size()?);
 
         // If the type can be contained in a register
         if var_type.is_primitive() {
@@ -980,7 +1062,10 @@ impl Compiler {
                 let fn_ctx = self.get_current_function()?;
                 fn_ctx.register_allocator.get_last_temp_register()?
             };
+            //println!("Last reg: {:?}", last_reg);
             let var_sp_offset = -(var_size as i16);
+            let stack_inc_instr = Instruction::new_inc_stack(var_size);
+            self.builder.push_instr(stack_inc_instr);
             self.inc_stack(var_size)?;
             let mov_instr = match var_type {
                 Type::Int => {
@@ -1008,19 +1093,17 @@ impl Compiler {
                         .with_operand::<i16>(var_sp_offset)
                 },
                 _ => {
-                    println!("Error in compile_var_decl_stmt()!");
+                    //println!("Error in compile_var_decl_stmt()!");
                     return Err(CompilerError::UnknownType(var_type));
                 }
             };
-            let stack_inc_instr = Instruction::new_inc_stack(var_size);
-            self.builder.push_instr(stack_inc_instr);
             self.builder.push_instr(mov_instr);
-            
         }
         // Otherwise, the value is already on the top of the stack.
         // Set the variable in the context.
         let fn_ctx = self.get_current_function_mut()?;
-        fn_ctx.set_stack_var((var_name, var_type), (fn_ctx.stack_size - var_size) as i64)?;
+        fn_ctx.set_stack_var((var_name.clone(), var_type.clone()), (fn_ctx.stack_size - var_size) as i64)?;
+        //println!("Setting var {}: {:?} to position {}", var_name, var_type, fn_ctx.stack_size - var_size);
         Ok(())
     }
 
@@ -1382,61 +1465,61 @@ impl Compiler {
 
         if return_expr_opt.is_some() {
             let return_expr = return_expr_opt.as_ref().unwrap();
+            let ret_expr_type = self.check_expr_type(return_expr)?;
+            //println!("Ret expr type: {:?}", ret_expr_type);
+            //println!("Ret expr: {:?}", return_expr);
             self.compile_expr(return_expr)?;
 
             // Move to R0 register if type is primitive
-            match fn_ret_type {
-                Type::Int => {
-                    let last_reg = {
-                        let fn_ctx = self.get_current_function()?;
-                        fn_ctx.register_allocator.get_last_temp_register()?
-                    };
-                    // Instruction for doing so
-                    let mov_ret_instr = Instruction::new(Opcode::MOVI)
-                        .with_operand::<u8>(last_reg.into())
-                        .with_operand::<u8>(Register::R0.into());
-                    self.builder.push_instr(mov_ret_instr);
-                },
-                Type::Float => {
-                    let last_reg = {
-                        let fn_ctx = self.get_current_function()?;
-                        fn_ctx.register_allocator.get_last_temp_register()?
-                    };
-                    // Instruction for doing so
-                    let mov_ret_instr = Instruction::new(Opcode::MOVF)
-                        .with_operand::<u8>(last_reg.into())
-                        .with_operand::<u8>(Register::R0.into());
-                    self.builder.push_instr(mov_ret_instr);
-                },
-                Type::Bool => {
-                    let last_reg = {
-                        let fn_ctx = self.get_current_function()?;
-                        fn_ctx.register_allocator.get_last_temp_register()?
-                    };
-                    // Instruction for doing so
-                    let mov_ret_instr = Instruction::new(Opcode::MOVB)
-                        .with_operand::<u8>(last_reg.into())
-                        .with_operand::<u8>(Register::R0.into());
-                    self.builder.push_instr(mov_ret_instr);
-                },
-                Type::Reference(inner) => {
-                    match inner.deref() {
-                        Type::AutoArray(_) => {},
-                        _ => {
-                            let last_reg = {
-                                let fn_ctx = self.get_current_function()?;
-                                fn_ctx.register_allocator.get_last_temp_register()?
-                            };
-                            // Instruction for doing so
-                            let mov_ret_instr = Instruction::new(Opcode::MOVA)
-                                .with_operand::<u8>(last_reg.into())
-                                .with_operand::<u8>(Register::R0.into());
-                            self.builder.push_instr(mov_ret_instr);
-                        },
-                    };
-                },
-                _ => {}
-            };
+            if ret_expr_type.is_primitive() {
+                match fn_ret_type {
+                    Type::Int => {
+                        let last_reg = {
+                            let fn_ctx = self.get_current_function()?;
+                            fn_ctx.register_allocator.get_last_temp_register()?
+                        };
+                        // Instruction for doing so
+                        let mov_ret_instr = Instruction::new(Opcode::MOVI)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<u8>(Register::R0.into());
+                        self.builder.push_instr(mov_ret_instr);
+                    },
+                    Type::Float => {
+                        let last_reg = {
+                            let fn_ctx = self.get_current_function()?;
+                            fn_ctx.register_allocator.get_last_temp_register()?
+                        };
+                        // Instruction for doing so
+                        let mov_ret_instr = Instruction::new(Opcode::MOVF)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<u8>(Register::R0.into());
+                        self.builder.push_instr(mov_ret_instr);
+                    },
+                    Type::Bool => {
+                        let last_reg = {
+                            let fn_ctx = self.get_current_function()?;
+                            fn_ctx.register_allocator.get_last_temp_register()?
+                        };
+                        // Instruction for doing so
+                        let mov_ret_instr = Instruction::new(Opcode::MOVB)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<u8>(Register::R0.into());
+                        self.builder.push_instr(mov_ret_instr);
+                    },
+                    Type::Reference(_) => {
+                        let last_reg = {
+                            let fn_ctx = self.get_current_function()?;
+                            fn_ctx.register_allocator.get_last_temp_register()?
+                        };
+                        // Instruction for doing so
+                        let mov_ret_instr = Instruction::new(Opcode::MOVA)
+                            .with_operand::<u8>(last_reg.into())
+                            .with_operand::<u8>(Register::R0.into());
+                        self.builder.push_instr(mov_ret_instr);
+                    },
+                    _ => {}
+                };
+            }
         }
 
         // Clean up the stack.
@@ -1475,7 +1558,7 @@ impl Compiler {
         // Compile the left hand side of this expression
         let lhs_expr_type = self.compile_lhs_assign_expr(&lhs_expr)?;
 
-        println!("Type to be assigned to: {:?}", lhs_expr_type);
+        //println!("Type to be assigned to: {:?}", lhs_expr_type);
         // Get the result register
         let mut lhs_reg = {
             let fn_ctx = self.get_current_function_mut()?;
@@ -1509,12 +1592,12 @@ impl Compiler {
 
         let mut stack_size = self.get_stack_size()?;
 
-        println!("Stack size before assign expr: {}", stack_size);
+        //println!("Stack size before assign expr: {}", stack_size);
 
         // Compile the right hand of this expression
         self.compile_expr(&rhs_expr)?;
         stack_size = self.get_stack_size()?;
-        println!("Stack size after assign expr: {}", stack_size);
+        //println!("Stack size after assign expr: {}", stack_size);
 
         // Last register used may contain the assignment value
         let rhs_reg = self.get_last_register()?;
@@ -1536,7 +1619,7 @@ impl Compiler {
         // Move the value to the assignment destination
         let assign_instr = match rhs_expr_type {
             Type::Int => {
-                println!("Moving value from {:?} to the address in {:?}", rhs_reg, lhs_reg);
+                //println!("Moving value from {:?} to the address in {:?}", rhs_reg, lhs_reg);
                 Instruction::new(Opcode::MOVI_RA)
                     .with_operand::<u8>(rhs_reg.into())
                     .with_operand::<u8>(lhs_reg.into())
@@ -1658,7 +1741,6 @@ impl Compiler {
                     .with_operand::<u8>(last_reg.into())
                     .with_operand::<u64>(member_offset as u64)
                     .with_operand::<u8>(next_reg.into());
-
                 
                 self.builder.push_instr(addui_instr);
                 cont_def.get_member_type(var_name)
@@ -1712,6 +1794,7 @@ impl Compiler {
     pub fn compile_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
         let expr_type = self.check_expr_type(expr)?;
         let expr_size = self.get_size_of_type(&expr_type)?;
+        //println!("Expr size: {}", expr_size);
         let before_stack_size = self.get_stack_size()?;
         match expr {
             Expression::IntLiteral(int) => {
@@ -1786,52 +1869,101 @@ impl Compiler {
             Expression::Variable(_) => {
                 self.compile_var_expr(expr)?;
             },
+            Expression::Ref(op_expr) => {
+                self.compile_lhs_assign_expr(op_expr)?;
+            },
+            Expression::Deref(op_expr) => {
+                let expr_type = self.check_expr_type(op_expr)?;
+                self.compile_expr(op_expr)?;
+                let ref_type = expr_type.get_ref_type();
+                if ref_type.is_primitive() {
+                    let last_reg = self.get_last_register()?;
+                    let next_reg = self.get_next_register()?;
+                    match ref_type {
+                        Type::Int => {
+                            let movi_instr = Instruction::new(Opcode::MOVI_AR)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<i16>(0)
+                                .with_operand::<u8>(next_reg.into());
+                            self.builder.push_instr(movi_instr);
+                        },
+                        Type::Float => {
+                            let movf_instr = Instruction::new(Opcode::MOVF_AR)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<i16>(0)
+                                .with_operand::<u8>(next_reg.into());
+                            self.builder.push_instr(movf_instr);
+                        },
+                        Type::Bool => {
+                            let movb_instr = Instruction::new(Opcode::MOVB_AR)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<i16>(0)
+                                .with_operand::<u8>(next_reg.into());
+                            self.builder.push_instr(movb_instr);
+                        },
+                        Type::Reference(inner_type) => {
+                            match inner_type.deref() {
+                                Type::AutoArray(_) => {
+                                    return Err(CompilerError::CannotDerefSlice)
+                                },
+                                _ => {}
+                            };
+                        },
+                        _ => {}
+                    };
+                } else {
+                    return Err(CompilerError::Unimplemented(format!("Deref of non-primitive pointer types")));
+                }
+            },
             Expression::MemberAccess(_, _) => {
+                //println!("Stack size before member access: {}", self.get_stack_size()?);
                 let expr_type = self.check_expr_type(expr)?;
                 self.compile_member_access_expr(expr, None)?;
                 // Register that contains the destination address for reading this value
                 let last_reg = self.get_last_register()?;
-                match &expr_type {
-                    Type::Int => {
-                        let next_reg = self.get_next_register()?;
-                        println!("Saving member access return value int into {:?}", next_reg);
-                        let movi_instr = Instruction::new(Opcode::MOVI_AR)
-                            .with_operand::<u8>(last_reg.into())
-                            .with_operand::<i16>(0)
-                            .with_operand::<u8>(next_reg.into());
-                        self.builder.push_instr(movi_instr);
-                    },
-                    Type::Float => {
-                        let next_reg = self.get_next_register()?;
-                        println!("Saving member access return value int into {:?}", next_reg);
-                        let movf_instr = Instruction::new(Opcode::MOVF_AR)
-                            .with_operand::<u8>(last_reg.into())
-                            .with_operand::<i16>(0)
-                            .with_operand::<u8>(next_reg.into());
-                        self.builder.push_instr(movf_instr);
-                    },
-                    Type::Bool => {
+                if expr_type.is_primitive() && !expr.is_member_call() {
+                    let next_reg = self.get_next_register()?;
+                    match expr_type {
+                        Type::Int => {
+                            //println!("Saving member access return value int into {:?}", next_reg);
+                            let movi_instr = Instruction::new(Opcode::MOVI_AR)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<i16>(0)
+                                .with_operand::<u8>(next_reg.into());
+                            self.builder.push_instr(movi_instr);
+                        },
+                        Type::Float => {
+                            //println!("Saving member access return value int into {:?}", next_reg);
+                            let movf_instr = Instruction::new(Opcode::MOVF_AR)
+                                .with_operand::<u8>(last_reg.into())
+                                .with_operand::<i16>(0)
+                                .with_operand::<u8>(next_reg.into());
+                            self.builder.push_instr(movf_instr);
+                        },
+                        Type::Bool => {
                         
-                    },
-                    Type::String => {
+                        },
+                        Type::Reference(_) => {
 
-                    },
-                    Type::Reference(inner_type) => {
-                        match inner_type.deref() {
-                            Type::AutoArray(_) => {},
-                            _ => {}
-                        }
-                    },
-                    _ => {
-
-                    }
-                };
+                        },
+                        _ => {}
+                    };
+                }
+                //println!("Stack size after member access: {}", self.get_stack_size()?);
             },
-            Expression::Call(_, _) => {
+            Expression::Call(fn_name, _) => {
+                //println!("Stack size before call expr: {}", self.get_stack_size()?);
                 self.compile_call_expr(expr)?;
-                self.get_current_function_mut()?
-                    .register_allocator
-                    .force_temp_register(Register::R0)
+                let fn_ret_type = {
+                    let fn_def = self.resolve_function(fn_name)?;
+                    fn_def.ret_type.clone()
+                };
+                if fn_ret_type.is_primitive() {
+                    self.get_current_function_mut()?
+                        .register_allocator
+                        .force_temp_register(Register::R0);
+                }
+                //println!("Stack size after call expr: {}", self.get_stack_size()?);
             },
             Expression::Addition(lhs, rhs) => {
                 let expr_type = self.check_expr_type(lhs)?;
@@ -1845,14 +1977,14 @@ impl Compiler {
                     let fn_ctx = self.get_current_function()?;
                     fn_ctx.register_allocator.get_last_temp_register()?
                 };
-                println!("Adding registers {:?} and {:?}", lhs_reg, rhs_reg);
+                //println!("Adding registers {:?} and {:?}", lhs_reg, rhs_reg);
                 match expr_type {
                     Type::Int => {
                         let res_reg = {
                             let fn_ctx = self.get_current_function_mut()?;
                             fn_ctx.register_allocator.get_temp_register()?
                         };
-                        println!("Saved result into {:?}", res_reg);
+                        //println!("Saved result into {:?}", res_reg);
                         let addi_instr = Instruction::new(Opcode::ADDI)
                             .with_operand::<u8>(lhs_reg.into())
                             .with_operand::<u8>(rhs_reg.into())
@@ -2261,52 +2393,35 @@ impl Compiler {
 
         let after_stack_size = self.get_stack_size()?;
         let stack_diff = after_stack_size - before_stack_size;
+        //println!("Stack diff: {}, is expr primitive: {}", stack_diff, expr_type.is_primitive());
+        let mut pop_size = stack_diff;
+        //println!("{}", pop_size > expr_size);
 
-        if stack_diff > 0 {
-            // Handle stack cleanup
-            let mut pop_size = stack_diff;
-            match expr_type {
-                Type::Int => {},
-                Type::Float => {},
-                Type::Bool => {},
-                Type::Reference(inner_type) => {
-                    match inner_type.deref() {
-                        Type::AutoArray(_) => {
-                            let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
-                                .with_operand::<u8>(Register::SP.into())
-                                .with_operand::<i16>(-(expr_size as i16))
-                                .with_operand::<u8>(Register::SP.into())
-                                .with_operand::<i16>(-(stack_diff as i16))
-                                .with_operand::<u32>(16);
-                            pop_size -= expr_size;
-                            self.builder.push_instr(mov_stack_instr);
-                        },
-                        _ => {}
-                    };
-                },
-                _ => {
-                    let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
-                        .with_operand::<u8>(Register::SP.into())
-                        .with_operand::<i16>(-(expr_size as i16))
-                        .with_operand::<u8>(Register::SP.into())
-                        .with_operand::<i16>(-(stack_diff as i16))
-                        .with_operand::<u32>(expr_size as u32);
-                    pop_size -= expr_size;
-                    self.builder.push_instr(mov_stack_instr);
-                },
-            };
-
+        if !expr_type.is_primitive() {
+            pop_size -= expr_size;
+            if pop_size > 0 {
+                let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-(expr_size as i16))
+                    .with_operand::<u8>(Register::SP.into())
+                    .with_operand::<i16>(-(stack_diff as i16))
+                    .with_operand::<u32>(16);
+                self.builder.push_instr(mov_stack_instr);
+            }
+        }
+        if pop_size > 0 {
+            //println!("Popping {} bytes off the stack after compile_expr().", pop_size);
             let pop_stack_instr = Instruction::new_dec_stack(pop_size);
             self.dec_stack(pop_size)?;
             self.builder.push_instr(pop_stack_instr);
         }
-
         Ok(())
         //Err(CompilerError::Unimplemented(format!("Expr compilation not implemented!")))
     }
 
     /// Compiles a member access expression
     pub fn compile_member_access_expr(&mut self, expr: &Expression, cont_def: Option<&ContainerDef>) -> CompilerResult<()> {
+        //println!("Line 2374");
         let (lhs_expr, rhs_expr) = match expr {
             Expression::MemberAccess(lhs, rhs) => (lhs.deref(), rhs.deref()),
             _ => return Err(CompilerError::Unknown)
@@ -2320,9 +2435,13 @@ impl Compiler {
                 // If variable is on stack
                 if cont_def.is_none() {
                     let var_offset = self.get_sp_offset_of_var(var_name)?;
+                    //println!("Member access of stack variable {}. Saving [SP]-{} into register {:?}.", var_name, var_offset.abs(), lhs_reg);
                     let var_type = self.get_type_of_var(var_name)?;
+                    //println!("Compiling member access for var {}:{:?} at offset {}", var_name, var_type, var_offset);
                     match &var_type {
                         Type::Other(cont_name) => {
+                            //println!("Doing this by subtracting {} from SP.", var_offset.abs());
+                            //println!("Converting [SP]-8 to pointer in register {:?}", lhs_reg);
                             let subui_instr = Instruction::new(Opcode::SUBU_I)
                                 .with_operand::<u8>(Register::SP.into())
                                 .with_operand::<u64>(var_offset.abs() as u64)
@@ -2332,11 +2451,14 @@ impl Compiler {
                         Type::Reference(inner_type) => {
                             match inner_type.deref() {
                                 Type::Other(cont_name) => {
+                                    //println!("Doing this by moving pointer at [SP]-{}.", var_offset.abs());
+                                    //println!("Saving pointer at [SP]-8 to register {:?}", lhs_reg);
                                     let mova_instr = Instruction::new(Opcode::MOVA_AR)
                                         .with_operand::<u8>(Register::SP.into())
-                                        .with_operand::<u64>(var_offset.abs() as u64)
+                                        .with_operand::<i16>(var_offset as i16)
                                         .with_operand::<u8>(lhs_reg.clone().into());
                                     self.builder.push_instr(mova_instr);
+                                    //println!("Is reference. moving pointer into register {:?}", lhs_reg);
                                 },
                                 _ => return Err(CompilerError::MemberAccessOnNonContainer)
                             };
@@ -2350,10 +2472,12 @@ impl Compiler {
                     let cont_def = cont_def.unwrap();
                     let member_offset = cont_def.get_member_offset(self, var_name)?;
                     let member_type = cont_def.get_member_type(var_name)?;
+                    //println!("Accessing member of {} with offset {}", cont_def.canonical_name, member_offset);
                     match &member_type {
                         Type::Reference(inner_type) => {
                             match inner_type.deref() {
                                 _ => {
+                                    //println!("Doing this by moving the pointer at [{:?}]+{} into {:?}.", last_reg, member_offset, lhs_reg);
                                     let mova_instr = Instruction::new(Opcode::MOVA_AR)
                                         .with_operand::<u8>(last_reg.into())
                                         .with_operand::<i16>(member_offset as i16)
@@ -2363,6 +2487,7 @@ impl Compiler {
                             };
                         },
                         _ => {
+                            //println!("Doing this by incrementing the pointer in [{:?}] by {} into {:?}", last_reg, member_offset, lhs_reg);
                             let addui_instr = Instruction::new(Opcode::ADDU_I)
                                 .with_operand::<u8>(last_reg.into())
                                 .with_operand::<u64>(member_offset as u64)
@@ -2387,18 +2512,39 @@ impl Compiler {
             _ => return Err(CompilerError::MemberAccessOnNonContainer)
         };
         let cont_def = self.resolve_container(cont_name)?;
-        let rhs_reg = self.get_next_register()?;
 
         match rhs_expr {
             Expression::Variable(member_name) => {
+                //println!("Accessing member {} of container {}", member_name, cont_def.canonical_name);
+                let rhs_reg = self.get_next_register()?;
                 let member_offset = cont_def.get_member_offset(self, member_name)?;
+                //println!("Offset for member {} : {}", member_name, member_offset);
+                //println!("Adding to pointer in {:?}", lhs_reg);
+                //println!("Doing this by adding {} to the pointer in {:?} and saving it in {:?}.", member_offset, lhs_reg, rhs_reg);
                 let addui_instr = Instruction::new(Opcode::ADDU_I)
                     .with_operand::<u8>(lhs_reg.into())
                     .with_operand::<u64>(member_offset as u64)
                     .with_operand::<u8>(rhs_reg.into());
                 self.builder.push_instr(addui_instr);
             },
+            Expression::Call(fn_name, _) => {
+                //println!("Calling function {} of container {}", fn_name, cont_def.canonical_name);
+                //println!("Stack size before member call expr: {}", self.get_stack_size()?);
+                self.compile_member_call_expr(rhs_expr, &cont_def)?;
+                let ret_type = {
+                    let fn_def = cont_def.get_member_function(fn_name)?;
+                    fn_def.ret_type.clone()
+                };
+                if ret_type.is_primitive() {
+                    //println!("Forcing temp register to R0");
+                    self.get_current_function_mut()?
+                        .register_allocator
+                        .force_temp_register(Register::R0);
+                }
+                //println!("Stack size after member call expr: {}", self.get_stack_size()?);
+            },
             Expression::MemberAccess(member_expr, _) => {
+                let rhs_reg = self.get_next_register()?;
                 let member_name = match member_expr.deref() {
                     Expression::Variable(var_name) => var_name,
                     _ => return Err(CompilerError::UnsupportedExpression(member_expr.deref().clone()))
@@ -2427,8 +2573,185 @@ impl Compiler {
         Ok(())
     }
 
+    /// Compiles a member call expression
+    pub fn compile_member_call_expr(&mut self, expr: &Expression, cont_def: &ContainerDef) -> CompilerResult<()> {
+        //println!("Line 2718");
+        let (fn_name, fn_arg_exprs) = match expr {
+            Expression::Call(fn_name, fn_args) => (fn_name, fn_args),
+            _ => return Err(CompilerError::Unknown)
+        };
+
+        //println!("Compiling call expr");
+
+        //println!("Compiling member call expr {} for type {}", fn_name, cont_def.canonical_name);
+
+        let fn_def = cont_def.get_member_function(fn_name)?;
+
+        let fn_ret_size = self.get_size_of_type(&fn_def.ret_type)?;
+
+        if fn_arg_exprs.len() + 1 != fn_def.arguments.len() {
+            return Err(CompilerError::UnknownFunction(fn_name.clone()));
+        }
+
+        let fn_def_first_arg_type = {
+            let fn_arg = fn_def.arguments.get(0)
+                .ok_or(CompilerError::Unknown)?;
+            fn_arg.1.clone()
+        };
+        let fn_args_first_arg_type = Type::Reference(Box::new(Type::Other(cont_def.canonical_name.clone())));
+        if fn_def_first_arg_type != fn_args_first_arg_type {
+            return Err(CompilerError::TypeMismatch(fn_def_first_arg_type, fn_args_first_arg_type));
+        }
+
+        let before_stack_size = self.get_stack_size()?;
+
+        let last_reg = self.get_last_register()?;
+        //println!("Address of container should be in {:?}", last_reg);
+        let stack_inc_instr = Instruction::new_inc_stack(8);
+        self.inc_stack(8)?;
+        let mova_instr = Instruction::new(Opcode::MOVA_RA)
+            .with_operand::<u8>(last_reg.into())
+            .with_operand::<u8>(Register::SP.into())
+            .with_operand::<i16>(-8);
+        self.builder.push_instr(stack_inc_instr);
+        self.builder.push_instr(mova_instr);
+
+        let mut stack_size = before_stack_size;
+
+        for i in 0..fn_arg_exprs.len() {
+            let mut expr_type = self.check_expr_type(&fn_arg_exprs[i])?;
+            self.canonize_type(&mut expr_type)?;
+            let fn_arg_type = &fn_def.arguments[i + 1].1;
+
+            if *fn_arg_type != expr_type {
+                return Err(CompilerError::TypeMismatch(fn_arg_type.clone(), expr_type.clone()));
+            }
+
+            // Compile this expr
+            self.compile_expr(&fn_arg_exprs[i])?;
+
+            let curr_stack_size = self.get_stack_size()?;
+
+            let stack_diff = curr_stack_size - stack_size;
+            let mut pop_size = stack_diff;
+
+            let size = self.get_size_of_type(&expr_type)?;
+            
+            /*
+            if !fn_arg_type.is_primitive() {
+                pop_size -= size;
+                if pop_size > 0 {
+                    let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16))
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(stack_diff as i16))
+                        .with_operand::<u32>(size as u32);
+                    self.builder.push_instr(mov_stack_instr);
+                }
+            }
+            if pop_size > 0 {
+                let dec_stack_instr = Instruction::new_dec_stack(pop_size);
+                self.dec_stack(pop_size)?;
+                self.builder.push_instr(dec_stack_instr);
+            }*/
+
+            let last_reg = {
+                self.get_current_function()?
+                    .register_allocator
+                    .get_last_temp_register()?
+            };
+
+            //println!("CHECKING IF EXPR TYPE IS PRIMITIVE");
+
+            if expr_type.is_primitive() {
+                //println!("incrementing stack for primitive type arg");
+                let stack_instr = Instruction::new_inc_stack(size);
+                self.builder.push_instr(stack_instr);
+                self.inc_stack(size)?;
+            }
+
+            let mov_instr_opt = match expr_type {
+                Type::Int => {
+                    Some(Instruction::new(Opcode::MOVI_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::Float => {
+                    Some(Instruction::new(Opcode::MOVF_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::Bool => {
+                    Some(Instruction::new(Opcode::MOVB_RA)
+                        .with_operand::<u8>(last_reg.into())
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16)))
+                },
+                Type::String => None,
+                Type::Reference(inner_type) => {
+                    match inner_type.deref() {
+                        Type::AutoArray(_) => None,
+                        _ => {
+                            Some(
+                                Instruction::new(Opcode::MOVA_RA)
+                                    .with_operand::<u8>(last_reg.into())
+                                    .with_operand::<u8>(Register::SP.into())
+                                    .with_operand::<i16>(-(size as i16))
+                            )
+                        }
+                    }
+                },
+                _ => {
+                    //println!("Error in compile_call_expr()!");
+                    return Err(CompilerError::UnknownType(expr_type));
+                }
+            };
+
+            if mov_instr_opt.is_some() {
+                self.builder.push_instr(mov_instr_opt.unwrap());
+            }
+
+            stack_size = self.get_stack_size()?;
+        }
+
+        let call_instr = Instruction::new(Opcode::CALL)
+            .with_operand::<u64>(fn_def.uid);
+        self.builder.push_instr(call_instr);
+        if !fn_def.ret_type.is_primitive() {
+            self.inc_stack(fn_ret_size)?;
+        }
+
+        let stack_diff = self.get_stack_size()? - before_stack_size;
+        //println!("Stack diff after member call expr: {}", stack_diff);
+        let mut pop_size = stack_diff;
+        if !fn_def.ret_type.is_primitive() {
+            let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                .with_operand::<u8>(Register::SP.into())
+                .with_operand::<i16>(-(fn_ret_size as i16))
+                .with_operand::<u8>(Register::SP.into())
+                .with_operand::<i16>(-(stack_diff as i16))
+                .with_operand::<u32>(fn_ret_size as u32);
+            pop_size -= fn_ret_size;
+            self.builder.push_instr(mov_stack_instr);
+        }
+
+        if pop_size > 0 {
+            let stack_dec_instr = Instruction::new_dec_stack(pop_size);
+            self.dec_stack(pop_size)?;
+            self.builder.push_instr(stack_dec_instr);
+        }
+
+        //println!("Stack diff of member call: {}", before_stack_size - self.get_stack_size()?);
+
+        Ok(())
+    }
+
     /// Compiles a cont instance expression
     pub fn compile_cont_instance_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        //println!("Line 2638");
         let (cont_name, cont_memper_map) = match expr {
             Expression::ContainerInstance(a1, a2) => (a1, a2),
             _ => return Err(CompilerError::Unknown)
@@ -2508,12 +2831,13 @@ impl Compiler {
 
     /// Compiles a call expresion
     pub fn compile_call_expr(&mut self, expr: &Expression) -> CompilerResult<()> {
+        //println!("Line 2718");
         let (fn_name, fn_arg_exprs) = match expr {
             Expression::Call(fn_name, fn_args) => (fn_name, fn_args),
             _ => return Err(CompilerError::Unknown)
         };
 
-        println!("Compiling call expr");
+        //println!("Compiling call expr");
 
         let fn_def = self.resolve_function(fn_name)?;
 
@@ -2522,37 +2846,50 @@ impl Compiler {
         if fn_arg_exprs.len() != fn_def.arguments.len() {
             return Err(CompilerError::UnknownFunction(fn_name.clone()));
         }
-
-        let mut stack_size = self.get_stack_size()?;
+        
+        let before_call_stack_size = self.get_stack_size()?;
+        let mut stack_size = before_call_stack_size;
 
         for i in 0..fn_def.arguments.len() {
-            let expr_type = self.check_expr_type(&fn_arg_exprs[i])?;
+            let mut expr_type = self.check_expr_type(&fn_arg_exprs[i])?;
+            self.canonize_type(&mut expr_type)?;
             let fn_arg_type = &fn_def.arguments[i].1;
-
             if *fn_arg_type != expr_type {
                 return Err(CompilerError::TypeMismatch(fn_arg_type.clone(), expr_type.clone()));
             }
 
+            //println!("Compiling call expr arg. Stack size: {}", self.get_stack_size()?);
+            //println!("Type of call expr: {:?}, size: {}", expr_type, self.get_size_of_type(&expr_type)?);
+
             // Compile this expr
             self.compile_expr(&fn_arg_exprs[i])?;
+
+
+            //println!("Compiled call expr arg. Stack size: {}", self.get_stack_size()?);
 
             let curr_stack_size = self.get_stack_size()?;
 
             let stack_diff = curr_stack_size - stack_size;
+            let mut pop_size = stack_diff;
 
             let size = self.get_size_of_type(&expr_type)?;
 
-            if size > 8 && stack_diff > 0 {
-                let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
-                    .with_operand::<u8>(Register::SP.into())
-                    .with_operand::<i16>(-(size as i16))
-                    .with_operand::<u8>(Register::SP.into())
-                    .with_operand::<i16>(-(stack_diff as i16))
-                    .with_operand::<u32>(size as u32);
-                let stack_dec_instr = Instruction::new_dec_stack(stack_diff);
-                self.builder.push_instr(mov_stack_instr);
+            if !expr_type.is_primitive() {
+                pop_size -= size;
+                if pop_size > 0 {
+                    let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(size as i16))
+                        .with_operand::<u8>(Register::SP.into())
+                        .with_operand::<i16>(-(stack_diff as i16))
+                        .with_operand::<u32>(size as u32);
+                    self.builder.push_instr(mov_stack_instr);
+                }
+            }
+            if pop_size > 0 {
+                let stack_dec_instr = Instruction::new_dec_stack(pop_size);
+                self.dec_stack(pop_size)?;
                 self.builder.push_instr(stack_dec_instr);
-                self.dec_stack(stack_diff)?;
             }
 
             let last_reg = {
@@ -2561,9 +2898,14 @@ impl Compiler {
                     .get_last_temp_register()?
             };
 
-            let stack_instr = Instruction::new_inc_stack(size);
-            self.builder.push_instr(stack_instr);
-            self.inc_stack(size)?;
+            //println!("CHECKING IF EXPR TYPE IS PRIMITIVE");
+
+            if expr_type.is_primitive() {
+                //println!("incrementing stack for primitive type arg");
+                let stack_instr = Instruction::new_inc_stack(size);
+                self.builder.push_instr(stack_instr);
+                self.inc_stack(size)?;
+            }
 
             let mov_instr_opt = match expr_type {
                 Type::Int => {
@@ -2585,8 +2927,21 @@ impl Compiler {
                         .with_operand::<i16>(-(size as i16)))
                 },
                 Type::String => None,
+                Type::Reference(inner_type) => {
+                    match inner_type.deref() {
+                        Type::AutoArray(_) => None,
+                        _ => {
+                            Some(
+                                Instruction::new(Opcode::MOVA_RA)
+                                    .with_operand::<u8>(last_reg.into())
+                                    .with_operand::<u8>(Register::SP.into())
+                                    .with_operand::<i16>(-(size as i16))
+                            )
+                        }
+                    }
+                },
                 _ => {
-                    println!("Error in compile_call_expr()!");
+                    //println!("Error in compile_call_expr()!");
                     return Err(CompilerError::UnknownType(expr_type));
                 }
             };
@@ -2601,20 +2956,27 @@ impl Compiler {
         let call_instr = Instruction::new(Opcode::CALL)
             .with_operand::<u64>(fn_def.uid);
         self.builder.push_instr(call_instr);
-        self.inc_stack(fn_ret_size)?;
+        if !fn_def.ret_type.is_primitive() {
+            self.inc_stack(fn_ret_size)?;
+        }
 
-        let stack_diff = self.get_stack_size()? - stack_size;
-        let pop_size = stack_diff - fn_ret_size;
+        let stack_diff = self.get_stack_size()? - before_call_stack_size;
+        //println!("Stack diff after args + call: {}", stack_diff);
+        let mut pop_size = stack_diff;
 
-        let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
-            .with_operand::<u8>(Register::SP.into())
-            .with_operand::<i16>(-(fn_ret_size as i16))
-            .with_operand::<u8>(Register::SP.into())
-            .with_operand::<i16>(-(stack_diff as i16))
-            .with_operand::<u32>(fn_ret_size as u32);
+        if !fn_def.ret_type.is_primitive() {
+            let mov_stack_instr = Instruction::new(Opcode::MOVN_A)
+                .with_operand::<u8>(Register::SP.into())
+                .with_operand::<i16>(-(fn_ret_size as i16))
+                .with_operand::<u8>(Register::SP.into())
+                .with_operand::<i16>(-(stack_diff as i16))
+                .with_operand::<u32>(fn_ret_size as u32);
+            pop_size -= fn_ret_size;
+            self.builder.push_instr(mov_stack_instr);
+        }
+        
         let stack_dec_instr = Instruction::new_dec_stack(pop_size);
         self.dec_stack(pop_size)?;
-        self.builder.push_instr(mov_stack_instr);
         self.builder.push_instr(stack_dec_instr);
 
         Ok(())
@@ -2627,7 +2989,7 @@ impl Compiler {
             _ => return Err(CompilerError::Unknown)
         };
 
-        println!("Compiling var expr");
+        //println!("Compiling var expr");
 
         let var_type = self.get_type_of_var(var_name)?;
         let mut var_offset = self.get_sp_offset_of_var(var_name)?;
@@ -2713,7 +3075,7 @@ impl Compiler {
                 self.builder.push_instr(movn_instr);
             },
             _ => {
-                println!("Errors in compile_var_expr()");
+                //println!("Errors in compile_var_expr()");
                 return Err(CompilerError::UnknownType(var_type));
             },
         };
@@ -2912,6 +3274,10 @@ impl Compiler {
         match &rhs_expr {
             Expression::Variable(var_name) => {
                 cont_def.get_member_type(var_name)
+            },
+            Expression::Call(fn_name, _) => {
+                let fn_def = cont_def.get_member_function(fn_name)?;
+                Ok(fn_def.ret_type.clone())
             },
             Expression::MemberAccess(member_expr, _) => {
                 let member_name = match member_expr.deref() {

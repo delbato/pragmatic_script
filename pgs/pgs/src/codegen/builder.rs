@@ -26,7 +26,7 @@ pub struct Builder {
     data: Vec<u8>,
     pub instructions: Vec<Instruction>,
     pub jmp_instructions: Vec<usize>,
-    labels: HashMap<String, usize>,
+    pub labels: HashMap<String, usize>,
     pub tags: HashMap<u64, Vec<usize>>
 }
 

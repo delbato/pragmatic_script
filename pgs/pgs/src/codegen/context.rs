@@ -93,8 +93,14 @@ impl ModuleContext {
     }
 
     /// Gets a mutable reference to a container definition, given the name
-    pub fn get_container(&mut self, name: &String) -> CompilerResult<&mut ContainerDef> {
+    pub fn get_container_mut(&mut self, name: &String) -> CompilerResult<&mut ContainerDef> {
         self.containers.get_mut(name)
+            .ok_or(CompilerError::UnknownContainer(name.clone()))
+    }
+
+    /// Gets a reference to a container definition
+    pub fn get_container(&self, name: &String) -> CompilerResult<&ContainerDef> {
+        self.containers.get(name)
             .ok_or(CompilerError::UnknownContainer(name.clone()))
     }
 

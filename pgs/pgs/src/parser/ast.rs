@@ -119,6 +119,23 @@ impl Expression {
             }
         }
     }
+
+    /// Checks if an expression is a member access expr
+    pub fn is_member_access(&self) -> bool {
+        match self {
+            Expression::MemberAccess(_, _) => true,
+            _ => false
+        }
+    }
+    /// Checks if an expression contains a member call expr
+    pub fn is_member_call(&self) -> bool {
+        match self {
+            Expression::MemberAccess(_, rhs) => {
+                rhs.is_member_call()
+            },
+            _ => false
+        }
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -220,6 +237,15 @@ impl Type {
                 }
             },
             _ => false
+        }
+    }
+
+    pub fn get_ref_type(&self) -> Type {
+        match self {
+            Type::Reference(inner_type) => {
+                inner_type.deref().clone()
+            },
+            _ => panic!("Not a reference!")
         }
     }
 }

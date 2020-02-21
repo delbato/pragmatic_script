@@ -202,8 +202,9 @@ impl Core {
         let program_len = self.program_len()?;
         //println!("Program length: {}", program_len);
         while self.ip.get::<usize>() < program_len {
-            //println!("ip: {}", self.ip);
+            //println!("ip: {}", self.ip.get::<usize>());
             let opcode = self.get_opcode()?;
+            //println!("opcode: {:?}", opcode);
             //println!("Stack values: {:?}", &self.stack[0..self.sp]);
             //println!("IP: {}", self.ip);
 

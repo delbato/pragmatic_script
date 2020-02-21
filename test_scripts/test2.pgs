@@ -1,9 +1,0 @@
-import std::print;
-import std::printi;
-import std::println;
-
-fn: main(argc: int) ~ int {
-    var hello: string = "Hello World!";
-    var ret: int = println(hello);
-    return 0;
-}

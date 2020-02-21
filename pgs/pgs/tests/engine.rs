@@ -15,7 +15,7 @@ use pgs::{
         adapter::Adapter
     }
 };
-
+/*
 #[test]
 fn test_engine_simple_function() {
     let code = String::from("
@@ -242,6 +242,13 @@ fn test_engine_cont_simple() {
                 x: float;
                 y: float;
             }
+            /*
+            impl: Vector {
+                fn: length(&this) ~ float {
+                    return this.x * this.y;
+                }
+            }
+            */
         }
 
         fn: main() {
@@ -315,5 +322,111 @@ fn test_engine_cont_simple() {
 
     let run_res = engine.run_fn("root::main");
     //println!("{:?}", run_res);
+    assert!(run_res.is_ok());
+}
+*/
+#[test]
+fn test_engine_member_call() {
+    let code = String::from("
+        import std::{
+            print,
+            println,
+            printf
+        };
+        
+        cont: Vector {
+            x: float;
+            y: float;
+        }
+        
+        impl: Vector {
+            fn: get_x(&this) ~ float {
+                return this.x;
+            }
+            fn: get_x_ptr(vec: &Vector) ~ &float {
+                return &vec.x;
+            }
+        }
+        
+
+        fn: get_ten() ~ float {
+            return 10.0;
+        }
+
+        fn: main() {
+            var vec = Vector {
+                x: 2.0,
+                y: 1.0
+            };
+            //var x = &vec.x;
+            var x = Vector::get_x(&vec);
+            vec.x += 3.14159;
+            print(\"Value of x: \");
+            printf(x);
+            println(\" \");
+        }
+    ");
+
+    let printf_function = Function::new("printf")
+        .with_arg(Type::Float)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter| {
+            let arg: f32 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let printi_function = Function::new("printi")
+        .with_arg(Type::Int)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling printi!");
+            let arg: i64 = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let print_function = Function::new("print")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling print!");
+            let arg: String = adapter.get_arg(0);
+            print!("{}", arg);
+        }));
+    let println_function = Function::new("println")
+        .with_arg(Type::String)
+        .with_ret_type(Type::Void)
+        .with_closure(Box::new(|adapter: &mut Adapter| {
+            //println!("Calling println!");
+            let arg: String = adapter.get_arg(0);
+            println!("{}", arg);
+        }));
+    let std_module = Module::new("std")
+        .with_function(printi_function)
+        .with_function(println_function)
+        .with_function(print_function)
+        .with_function(printf_function);
+    
+    let mut engine = Engine::new(1024);
+
+    let reg_res = engine.register_module(std_module);
+    //println!("{:?}", reg_res);
+    assert!(reg_res.is_ok());
+
+    let load_res = engine.load_code(&code);
+    println!("{:?}", load_res);
+    assert!(load_res.is_ok());
+
+    assert_eq!(engine.get_stack_size(), 0);
+
+    /*
+    let mut offset = 0;
+    for instr in engine.compiler.get_builder().instructions.iter() {
+        println!("{}: {:?}", offset, instr);
+        offset += instr.get_size();
+    }
+    */
+
+    let run_res = engine.run_fn("root::main");
+
+    assert_eq!(engine.get_stack_size(), 0);
+    println!("{:?}", run_res);
     assert!(run_res.is_ok());
 }

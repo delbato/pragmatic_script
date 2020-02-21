@@ -260,27 +260,21 @@ impl Parser {
             return make_parse_error!(lexer, ParseErrorType::ExpectedImplType);
         }
 
-        let impl_type = String::from(lexer.slice());
+        let impl_type = self.parse_mod_path(lexer)?;
         let mut impl_for = impl_type.clone();
-
-        // Swallow impl type
-        lexer.advance();
 
         if lexer.token == Token::For {
             // Swallow "for" if its next
             lexer.advance();
 
-            impl_for = String::from(lexer.slice());
-
-            // Swallow impl for type
-            lexer.advance();
+            impl_for = self.parse_mod_path(lexer)?;
         }
 
         if lexer.token != Token::OpenBlock {
             return make_parse_error!(lexer, ParseErrorType::ExpectedOpenBlock);
         }
 
-        // Swallow "}"
+        // Swallow "{"
         lexer.advance();
 
         *(self.current_cont.borrow_mut()) = impl_type.clone();
@@ -288,6 +282,9 @@ impl Parser {
         let decl_list = self.parse_decl_list(lexer, &[Token::CloseBlock])?;
 
         *(self.current_cont.borrow_mut()) = String::new();
+
+        // Swallow "}"
+        lexer.advance();
 
         Ok(
             Declaration::Impl(impl_type, impl_for, decl_list)
@@ -449,6 +446,13 @@ impl Parser {
         // Swallow "import"
         lexer.advance();
 
+        if lexer.token != Token::Colon {
+            return make_parse_error!(lexer, ParseErrorType::ExpectedColon);
+        }
+
+        // Swallow ":"
+        lexer.advance();
+
         let delims = &[
             Token::Semicolon,
             Token::OpenBlock,
@@ -506,7 +510,6 @@ impl Parser {
         if lexer.token == Token::Tilde {
             lexer.advance();
             fn_return_type = self.parse_type(lexer)?;
-            lexer.advance();
         } else {
             fn_return_type = Type::Void;
         }
@@ -569,10 +572,10 @@ impl Parser {
 
             ret.push(fn_arg);
 
-            lexer.advance();
             if lexer.token != Token::Comma {
                 break;
             }
+
             arg_index += 1;
             lexer.advance();
         }
@@ -600,6 +603,8 @@ impl Parser {
             }
             let arg_type = Type::Reference(Box::new(Type::Other(cont_name)));
 
+            // Swallow "this"
+            lexer.advance();
             return Ok((arg_name, arg_type));
         }
 
@@ -671,10 +676,22 @@ impl Parser {
 
     pub fn parse_type(&self, lexer: &mut Lexer) -> ParseResult<Type> {
         let ret_type = match lexer.token {
-            Token::Int => Type::Int,
-            Token::Float => Type::Float,
-            Token::Bool => Type::Float,
-            Token::String => Type::String,
+            Token::Int => {
+                lexer.advance();
+                Type::Int
+            },
+            Token::Float => {
+                lexer.advance();
+                Type::Float
+            },
+            Token::Bool => {
+                lexer.advance();
+                Type::Bool
+            },
+            Token::String => {
+                lexer.advance();
+                Type::String
+            },
             Token::And => {
                 // Swallow "&"
                 lexer.advance();
@@ -766,9 +783,6 @@ impl Parser {
         lexer.advance();
 
         let member_type = self.parse_type(lexer)?;
-
-        // Swallow member type
-        lexer.advance();
 
         if lexer.token != Token::Semicolon {
             return Err(ParseError::new(ParseErrorType::ExpectedSemicolon, lexer.range()));
@@ -1142,8 +1156,6 @@ impl Parser {
             lexer.advance();
 
             var_type = self.parse_type(lexer)?;
-            // Swallow type
-            lexer.advance();
         }
 
         if lexer.token != Token::Assign {
@@ -1301,11 +1313,11 @@ impl Parser {
             },
             Token::Tilde => {
                 let op = operand_stack.pop_front().unwrap();
-                Expression::Ref(Box::new(op))
+                Expression::Deref(Box::new(op))
             },
             Token::And => {
                 let op = operand_stack.pop_front().unwrap();
-                Expression::Deref(Box::new(op))
+                Expression::Ref(Box::new(op))
             },
             Token::Dot => {
                 let rhs = operand_stack.pop_front().unwrap();

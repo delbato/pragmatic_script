@@ -77,17 +77,24 @@ impl From<&FunctionDeclArgs> for FunctionDef {
 /// A container definition
 #[derive(Clone, Debug)]
 pub struct ContainerDef {
+    /// Name of the container
     pub name: String,
+    /// Name of the container, including full module path
+    pub canonical_name: String,
+    /// Map of member variable types
     pub member_variables: HashMap<String, Type>,
+    /// Map of member variable indices
     pub member_indices: BTreeMap<String, usize>,
+    /// Map of member functions
     pub member_functions: HashMap<String, FunctionDef>
 }
 
 impl ContainerDef {
     /// Creates a new container definition
-    pub fn new(name: String) -> ContainerDef {
+    pub fn new(name: String, canon_name: String) -> ContainerDef {
         ContainerDef {
             name: name,
+            canonical_name: canon_name,
             member_indices: BTreeMap::new(),
             member_functions: HashMap::new(),
             member_variables: HashMap::new()
@@ -152,20 +159,23 @@ impl ContainerDef {
             .ok_or(CompilerError::UnknownMember(name.clone()))
     }
 
+    /// Returns a function definition 
+    pub fn get_member_function(&self, name: &String) -> CompilerResult<&FunctionDef> {
+        self.member_functions.get(name)
+            .ok_or(CompilerError::UnknownMember(name.clone()))
+    }
+
     /// Merges a container declaration into an existing containerdef
     pub fn merge_cont_decl(&mut self, item: &ContainerDeclArgs) {
         for member in item.members.iter() {
             self.add_member_variable(member.clone()).unwrap();
         }
     }
-}
 
-impl From<&ContainerDeclArgs> for ContainerDef {
-    fn from(item: &ContainerDeclArgs) -> ContainerDef {
-        let mut def = ContainerDef::new(item.name.clone());
-        for member in item.members.iter() {
-            def.add_member_variable(member.clone()).unwrap();
-        }
+    /// Creates a new ContainerDef from a declaration
+    pub fn from_decl(item: &ContainerDeclArgs, canon_name: String) -> ContainerDef {
+        let mut def = ContainerDef::new(item.name.clone(), canon_name);
+        def.merge_cont_decl(item);
         def
     }
 }
